@@ -67,6 +67,10 @@ cargo run -- track slots --transactions --save
 # Add account to monitoring
 cargo run -- track wallets add --address u5LGUD4bX7BpaUuMjNw5oZp1vcbJhhPy9dJpKaWggCX --name "My Account"
 
+# Remove account from db
+cargo run -- track wallets remove --address u5LGUD4bX7BpaUuMjNw5oZp1vcbJhhPy9dJpKaWggCX --name "My Account"
+
+
 # Monitor account in real-time
 cargo run -- track wallets watch --interval 2000
 
@@ -74,7 +78,7 @@ cargo run -- track wallets watch --interval 2000
 cargo run -- track wallets list --detailed
 ```
 
-### Interactive TUI
+### Interactive TUI (Borken) 
 ```bash
 # Launch beautiful terminal interface
 cargo run -- tui
