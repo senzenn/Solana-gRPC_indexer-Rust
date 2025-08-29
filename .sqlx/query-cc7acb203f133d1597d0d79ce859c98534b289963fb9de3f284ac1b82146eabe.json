@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO slot_leaders (slot, leader_pubkey, validator_name) VALUES ($1, $2, $3) ON CONFLICT (slot) DO UPDATE SET leader_pubkey = $2, validator_name = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "cc7acb203f133d1597d0d79ce859c98534b289963fb9de3f284ac1b82146eabe"
+}

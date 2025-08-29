@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT slot, blockhash, parent_slot, finalized, timestamp FROM slots WHERE slot = $1",
+  "describe": {
+    "columns": [
+      {
+        "name": "slot",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "blockhash",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "parent_slot",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "finalized",
+        "ordinal": 3,
+        "type_info": "Bool"
+      },
+      {
+        "name": "timestamp",
+        "ordinal": 4,
+        "type_info": "Datetime"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "26cbe48853019a0d1131565708d1468511d99ab7410587cb8efd3bf2f4ebac75"
+}

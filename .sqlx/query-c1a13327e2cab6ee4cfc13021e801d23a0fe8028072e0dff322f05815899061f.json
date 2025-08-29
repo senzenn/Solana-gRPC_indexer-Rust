@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR REPLACE INTO transactions (signature, slot, fee, status, program_ids, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "c1a13327e2cab6ee4cfc13021e801d23a0fe8028072e0dff322f05815899061f"
+}

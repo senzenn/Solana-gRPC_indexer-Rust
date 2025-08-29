@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO slots (slot, blockhash, parent_slot, finalized, timestamp) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (slot) DO UPDATE SET blockhash = $2, parent_slot = $3, finalized = $4, timestamp = $5",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "e900968e18b17ee7194e9b5f6cd432cd80f5e98583834965ee2bfb37bb0e4692"
+}

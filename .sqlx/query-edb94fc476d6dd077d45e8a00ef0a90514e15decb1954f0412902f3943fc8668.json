@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT slot, leader_pubkey, validator_name FROM slot_leaders WHERE slot = $1",
+  "describe": {
+    "columns": [
+      {
+        "name": "slot",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "leader_pubkey",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "validator_name",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "edb94fc476d6dd077d45e8a00ef0a90514e15decb1954f0412902f3943fc8668"
+}

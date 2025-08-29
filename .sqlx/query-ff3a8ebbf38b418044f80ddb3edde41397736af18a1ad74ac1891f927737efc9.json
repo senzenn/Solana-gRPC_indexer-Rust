@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT signature, slot, fee, status, program_ids, timestamp FROM transactions WHERE slot = $1",
+  "describe": {
+    "columns": [
+      {
+        "name": "signature",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "slot",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "fee",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "status",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "program_ids",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "timestamp",
+        "ordinal": 5,
+        "type_info": "Datetime"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ff3a8ebbf38b418044f80ddb3edde41397736af18a1ad74ac1891f927737efc9"
+}

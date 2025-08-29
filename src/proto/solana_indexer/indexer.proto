@@ -1,0 +1,116 @@
+syntax = "proto3";
+
+package solana_indexer;
+
+// Solana Indexer Service for real-time slot tracking
+service SolanaIndexer {
+    // Subscribe to real-time slot updates
+    rpc SubscribeSlots(SlotSubscriptionRequest) returns (stream SlotUpdate);
+
+    // Get current slot information
+    rpc GetCurrentSlot(GetCurrentSlotRequest) returns (SlotInfo);
+
+    // Get slot information for specific slot
+    rpc GetSlot(GetSlotRequest) returns (SlotInfo);
+
+    // Get slot leader information
+    rpc GetSlotLeader(GetSlotLeaderRequest) returns (SlotLeaderInfo);
+
+    // Subscribe to slot leader changes
+    rpc SubscribeSlotLeaders(SlotLeaderSubscriptionRequest) returns (stream SlotLeaderUpdate);
+
+    // Get transactions by signatures
+    rpc GetTransactions(GetTransactionsRequest) returns (GetTransactionsResponse);
+
+    // Get account information
+    rpc GetAccount(GetAccountRequest) returns (AccountInfo);
+}
+
+// Request messages
+message SlotSubscriptionRequest {
+    bool include_finalized = 1;
+    bool include_confirmed = 2;
+    bool include_processed = 3;
+}
+
+message GetCurrentSlotRequest {}
+
+message GetSlotRequest {
+    uint64 slot = 1;
+}
+
+message GetSlotLeaderRequest {
+    uint64 slot = 1;
+}
+
+message SlotLeaderSubscriptionRequest {
+    uint64 start_slot = 1;
+    uint64 end_slot = 2; // 0 means unlimited
+}
+
+message GetTransactionsRequest {
+    repeated string signatures = 1;
+    uint32 limit = 2;
+}
+
+message GetAccountRequest {
+    string address = 1;
+}
+
+// Response messages
+message SlotUpdate {
+    uint64 slot = 1;
+    string commitment = 2; // "finalized", "confirmed", "processed"
+    int64 timestamp = 3;
+    uint64 parent_slot = 4;
+    string block_hash = 5;
+    uint64 block_height = 6;
+}
+
+message SlotInfo {
+    uint64 current_slot = 1;
+    uint64 finalized_slot = 2;
+    uint64 confirmed_slot = 3;
+    int64 timestamp = 4;
+}
+
+message SlotLeaderInfo {
+    uint64 slot = 1;
+    string leader_pubkey = 2;
+    int64 timestamp = 3;
+}
+
+message SlotLeaderUpdate {
+    uint64 slot = 1;
+    string leader_pubkey = 2;
+    string previous_leader = 3;
+    int64 timestamp = 4;
+}
+
+message GetTransactionsResponse {
+    repeated TransactionInfo transactions = 1;
+    uint32 total_count = 2;
+    uint32 cached_count = 3;
+}
+
+message TransactionInfo {
+    string signature = 1;
+    uint64 slot = 2;
+    string from = 3;
+    string to = 4;
+    uint64 amount = 5;
+    uint64 fee = 6;
+    string status = 7;
+    int64 timestamp = 8;
+}
+
+message AccountInfo {
+    string address = 1;
+    uint64 lamports = 2;
+    string owner = 3;
+    bool executable = 4;
+    uint64 rent_epoch = 5;
+    uint64 data_size = 6;
+    uint64 slot = 7;
+    int64 timestamp = 8;
+}

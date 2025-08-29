@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR REPLACE INTO slots (slot, blockhash, parent_slot, finalized, timestamp) VALUES (?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "1e367ee18d56cadb29733a79d4806efb0f6ee9fc321aa5c065e10c0dc616bfae"
+}

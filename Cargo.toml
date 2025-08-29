@@ -1,0 +1,87 @@
+[package]
+name = "index-cli"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = { version = "1.0.99", features = ["std"] }
+axum = "0.8.4"
+clap = { version = "4.5.46", features = ["derive", "color", "env", "unicode", "wrap_help", "suggestions"] }
+clap_complete = "4.5.46"
+solana-sdk = "3.0.0"
+solana-client = "3.0.0"
+solana-rpc-client = "3.0.0"
+solana-transaction-status = "3.0.0"
+solana-rpc-client-api = "3.0.0"
+
+# gRPC and serialization
+tonic = "0.14.1"
+prost = "0.14.1"
+tokio = { version = "1.47.1", features = ["full"] }
+tokio-stream = "0.1.17"
+h2 = "0.4.12"
+
+# Yellowstone gRPC client for real-time Solana monitoring
+yellowstone-grpc-client = "9.0.0"
+yellowstone-grpc-proto = "9.0.0"
+bs58 = "0.5.1"
+env_logger = "0.11.0"
+
+# Terminal output formatting
+crossterm = { version = "0.27.0", features = ["event-stream"] }
+colored = "2.1.0"
+log = "0.4.27"
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+serde = { version = "1.0.213", features = ["derive"] }
+serde_json = "1.0.133"
+
+# Async utilities
+futures = "0.3.31"
+crossbeam-channel = "0.5.13"
+
+# Environment and configuration
+dotenv = "0.15.0"
+dotenvy = "0.15.7"
+reqwest = { version = "0.12.8", features = ["json", "stream"] }
+uuid = { version = "1.11.0", features = ["v4"] }
+
+# SQLx database client
+sqlx = { version = "0.8.5", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid", "migrate"] }
+
+# High-performance caching with LRU + TTL
+moka = { version = "0.12.10", features = ["future"] }
+
+# IPFS integration
+ipfs-api-backend-hyper = { version = "0.6.0", features = ["with-builder"] }
+
+# Compression and encryption for IPFS
+flate2 = "1.0"
+sha2 = "0.10"
+base32 = "0.4"
+
+# Async trait support
+async-trait = "0.1"
+
+# WebSocket support for QuickNode webhooks
+tokio-tungstenite = { version = "0.21.0", features = ["native-tls"] }
+url = "2.5.0"
+
+# Advanced JSON handling
+serde_with = "3.4.0"
+
+# Metrics and monitoring
+metrics = "0.22.3"
+metrics-exporter-prometheus = "0.13.1"
+
+# Database for persistence (optional)
+sled = "0.34.7"
+
+# Date and time handling
+chrono = { version = "0.4.31", features = ["serde"] }
+
+# YAML support for export
+serde_yaml = "0.9.34"
+
+[build-dependencies]
+tonic-build = "0.14.1"

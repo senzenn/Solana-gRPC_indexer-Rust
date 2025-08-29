@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO transactions (signature, slot, fee, status, program_ids, timestamp) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (signature) DO UPDATE SET slot = $2, fee = $3, status = $4, program_ids = $5, timestamp = $6",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "b3ba3b84ee4a88f650237a26578e1c956477ae050f41784aa48c835b3cb772db"
+}

@@ -1,0 +1,76 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment and secrets
+.env
+.env.local
+.env.production
+.env.staging
+*.pem
+*.key
+*.crt
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+/data/
+
+# Logs
+*.log
+logs/
+
+# IPFS
+.ipfs/
+
+# Cache
+cache/
+.cache/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Build artifacts
+dist/
+build/
+
+# Backup files
+*.bak
+*.backup
+
+# Coverage reports
+coverage/
+*.profraw
+
+# Node modules (if any JS tools)
+node_modules/
+
+# Python (if any Python tools)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local configuration
+config.local.*
+
+# Documentation build
+/docs/_build/
+
+# Keep example files
+!.env.example
+!config.example.*

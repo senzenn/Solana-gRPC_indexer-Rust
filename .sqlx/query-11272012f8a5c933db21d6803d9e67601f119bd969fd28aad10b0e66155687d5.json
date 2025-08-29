@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR REPLACE INTO slot_leaders (slot, leader_pubkey, validator_name) VALUES (?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "11272012f8a5c933db21d6803d9e67601f119bd969fd28aad10b0e66155687d5"
+}
