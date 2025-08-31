@@ -115,7 +115,7 @@ DATABASE_URL=sqlite:solana_indexer.db
 
 ## 🏗️ Architecture
 
-![Project Architecture](assets/image.png)
+![Project Architecture](public/image.png)
 
 *Detailed architecture diagram showing the data flow from CLI interface through core services, data sources, caching & storage, to output & streaming layers.*
 
