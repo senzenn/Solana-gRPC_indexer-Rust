@@ -78,7 +78,7 @@ cargo run -- track wallets watch --interval 2000
 cargo run -- track wallets list --detailed
 ```
 
-### Interactive TUI (Borken) 
+### Interactive TUI (Broken) 
 ```bash
 # Launch beautiful terminal interface
 cargo run -- tui
