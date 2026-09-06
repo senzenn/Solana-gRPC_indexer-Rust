@@ -1,0 +1,49 @@
+# CHANGES — vixen-integration scaffolding
+
+## Confirmations
+- clippy pedantic: clean
+- manual-test.sh: 14/14
+- No diff.rs classification changes
+- `vixen-integration/` added: README (fixture list + GitHub blob URLs), `run.sh`,
+  `pre-regen-guard.sh`, `PRE-REGEN.md`, `FINDINGS.md`
+- `vixen-integration/idls/*.json` gitignored (populate locally)
+
+## limit_order v1→v2 (local Vixen Codama copy)
+- **Sensible overall:** exit 1; **96 breaking**, 10 dangerous, 2 additive
+- Surfaces real account-meta churn, Order/Fee/event layout breaks, removed/added ixs
+- Pre-regen guard: `BREAKING — DO NOT REGENERATE: 96 changes` (exit 1)
+
+### Classified finding kinds (headline)
+- account changed at fixed position (~49)
+- FIELD changed (~30)
+- arg changed / new / removed
+- account removed / instruction removed
+- Dangerous: new account on instruction (min-accounts)
+- Additive: cancelDustOrder + cancelDustOrderEvent
+
+## Inspect (fixtures present in this checkout)
+- **Clean (Generic=0):** dca, dynamic_bonding_curve, glow, invite_escrow,
+  jupiter_log_scope_regression, limit_order_v1/v2, loopscale, metaplex,
+  okx_labs1, order_engine, pump_fun, raydium_amm_v4_with_swapv2,
+  spl_governance, squads_multisig_program
+- **Reachable Generic:** perpetuals.json — 4× `f32` (`priceImpactExponent` /
+  `priceImpactBuffer.exponent`) — acceptable opaque NumberFormat gap
+- **Not in local checkout (download via README):** inline_struct.json,
+  inline_struct_collisions.json, constant_bytes_account.json
+
+## FINDINGS.md gaps (for review — not fixed)
+1. **Messages omit field/arg names** — Breaking lines like `u64 -> u64` are real
+   renames at a fixed index; message only prints types (misleading, not a miss).
+2. **Inline struct** still Generic when that fixture is present (documented residual).
+
+## cargo clippy --all-targets -- -W clippy::pedantic 2>&1
+    Checking idl-drift v0.1.0 (/Users/senzenn/oss/idl-drift)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.49s
+
+## pre-regen-guard (limit_order v1->v2) sample
+== pre-regen guard (Vixen #108 step 3) ==
+old: vixen-integration/idls/limit_order_v1.json
+new: vixen-integration/idls/limit_order_v2.json
+
+BREAKING — DO NOT REGENERATE: 96 changes
+exit=1

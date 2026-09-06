@@ -1,0 +1,2 @@
+IX|init|disc=4,4,4,4,4,4,4,4
+IXACCT|init#0|name=state;writable=1;signer=0;pda=seeds:const:vault,arg:authority

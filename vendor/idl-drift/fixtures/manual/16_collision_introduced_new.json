@@ -1,0 +1,32 @@
+{
+  "address": "Drift1111111111111111111111111111111111111",
+  "metadata": {
+    "name": "demo",
+    "version": "0.1.0",
+    "spec": "0.1.0"
+  },
+  "instructions": [
+    {
+      "name": "placeOrder",
+      "discriminator": [10, 20, 30, 40, 50, 60, 70, 80],
+      "accounts": [
+        { "name": "market", "writable": true },
+        { "name": "user", "signer": true }
+      ],
+      "args": []
+    },
+    {
+      "name": "cancelOrder",
+      "discriminator": [10, 20, 30, 40, 50, 60, 70, 80],
+      "accounts": [
+        { "name": "market", "writable": true },
+        { "name": "user", "signer": true }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [],
+  "events": [],
+  "errors": [],
+  "types": []
+}

@@ -1,0 +1,4 @@
+[BREAKING ] type kind changed (Foo): struct -> enum
+
+SUMMARY: 1 breaking, 0 dangerous, 0 additive, 0 cosmetic
+RESULT: FAIL (breaking changes present)

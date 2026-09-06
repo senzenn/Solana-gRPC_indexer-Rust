@@ -1,0 +1,2 @@
+IX|transfer|disc=
+IXARG|transfer#0|name=amount;type=u64

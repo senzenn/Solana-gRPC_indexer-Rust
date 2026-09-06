@@ -1,0 +1,16 @@
+# CHANGES — prompt4: README idl-drift vs deserialize_checked
+
+## Done
+- Added `## idl-drift vs. deserialize_checked` with a short complementary framing
+  and a when/input/network/failure table.
+- Linked https://github.com/rpcpool/yellowstone-vixen/issues/108 in that section
+  (also already linked from Problem).
+- Extended Limitations with one line on file-first design (private / source-built
+  IDLs that RPC-only tooling would miss).
+- Pointed Limitations at pairing with `deserialize_checked` + tx-replay.
+- No "Drafted with Dia" signature.
+
+## Checks
+- Markdown structure: ATX headings, fenced tables, one external link to #108
+  in the new section (`https://github.com/rpcpool/yellowstone-vixen/issues/108`).
+- Confirmed `#108` / `yellowstone-vixen/issues/108` present in README.md.

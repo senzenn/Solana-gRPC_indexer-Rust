@@ -1,0 +1,121 @@
+=== cargo build 2>&1 ===
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.47
+   Compiling serde_core v1.0.229
+   Compiling serde v1.0.229
+   Compiling hashbrown v0.17.1
+   Compiling equivalent v1.0.2
+   Compiling winnow v0.7.15
+   Compiling toml_write v0.1.2
+   Compiling zmij v1.0.23
+   Compiling serde_json v1.0.151
+   Compiling thiserror v2.0.19
+   Compiling memchr v2.8.3
+   Compiling indexmap v2.14.0
+   Compiling itoa v1.0.18
+   Compiling utf8parse v0.2.2
+   Compiling anstyle-parse v1.0.0
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling anstyle-query v1.1.5
+   Compiling anstyle v1.0.14
+   Compiling colorchoice v1.0.5
+   Compiling heck v0.5.0
+   Compiling anstream v1.0.0
+   Compiling strsim v0.11.1
+   Compiling clap_lex v1.1.0
+   Compiling owo-colors v4.3.0
+   Compiling clap_builder v4.6.5
+   Compiling bs58 v0.5.1
+   Compiling base64 v0.22.1
+   Compiling syn v3.0.3
+   Compiling syn v2.0.119
+   Compiling serde_derive v1.0.229
+   Compiling thiserror-impl v2.0.19
+   Compiling clap_derive v4.6.4
+   Compiling derive_more-impl v1.0.0
+   Compiling clap v4.6.5
+   Compiling derive_more v1.0.0
+   Compiling serde_spanned v0.6.9
+   Compiling toml_datetime v0.6.11
+   Compiling toml_edit v0.22.27
+   Compiling toml v0.8.23
+   Compiling cargo_toml v0.20.5
+   Compiling codama-errors v0.9.3
+   Compiling codama-syn-helpers v0.9.3
+   Compiling codama-nodes-derive v0.9.3
+   Compiling codama-nodes v0.9.1
+   Compiling idl-drift v0.1.0 (/Users/senzenn/oss/idl-drift)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 12.13s
+
+=== cargo clippy --all-targets -- -W clippy::pedantic 2>&1 ===
+   Compiling unicode-ident v1.0.24
+   Compiling hashbrown v0.17.1
+   Compiling equivalent v1.0.2
+   Compiling winnow v0.7.15
+   Compiling serde_core v1.0.229
+   Compiling toml_write v0.1.2
+   Compiling zmij v1.0.23
+   Compiling itoa v1.0.18
+   Compiling proc-macro2 v1.0.107
+   Compiling memchr v2.8.3
+    Checking utf8parse v0.2.2
+    Checking anstyle-parse v1.0.0
+    Checking indexmap v2.14.0
+   Compiling quote v1.0.47
+    Checking anstyle-query v1.1.5
+   Compiling syn v3.0.3
+   Compiling syn v2.0.119
+    Checking is_terminal_polyfill v1.70.2
+    Checking colorchoice v1.0.5
+    Checking anstyle v1.0.14
+    Checking anstream v1.0.0
+    Checking clap_lex v1.1.0
+    Checking strsim v0.11.1
+    Checking owo-colors v4.3.0
+    Checking bs58 v0.5.1
+    Checking clap_builder v4.6.5
+    Checking base64 v0.22.1
+    Checking serde_json v1.0.151
+   Compiling serde_derive v1.0.229
+   Compiling thiserror-impl v2.0.19
+   Compiling clap_derive v4.6.4
+   Compiling derive_more-impl v1.0.0
+   Compiling thiserror v2.0.19
+    Checking clap v4.6.5
+   Compiling derive_more v1.0.0
+   Compiling serde v1.0.229
+    Checking serde_spanned v0.6.9
+    Checking toml_datetime v0.6.11
+    Checking toml_edit v0.22.27
+    Checking toml v0.8.23
+    Checking cargo_toml v0.20.5
+    Checking codama-errors v0.9.3
+   Compiling codama-syn-helpers v0.9.3
+   Compiling codama-nodes-derive v0.9.3
+    Checking codama-nodes v0.9.1
+    Checking idl-drift v0.1.0 (/Users/senzenn/oss/idl-drift)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 9.21s
+
+=== TypeNode / number shapes that still map to Type::Generic ===
+
+From convert_type (Codama TypeNode):
+- Map (mapTypeNode) — associative key/value; not a positional Borsh scalar field layout we model. Opaque by design; kind equality still catches map↔other renames.
+- Set (setTypeNode) — same rationale as Map.
+- Tuple (tupleTypeNode) — inline tuple-as-field has no Defined name without inventing synthetic ids. Top-level account/definedTypes structs are promoted to TypeDef separately. Known gap for rare inline tuples; Vixen fixtures typically Link definedTypes.
+- Struct (structTypeNode) — same as Tuple for inline struct-as-field; account/definedTypes promotion path is separate. Known gap if Codama embeds anonymous structs in fields.
+- Enum (enumTypeNode) — same as Struct for inline enum-as-field; definedTypes enums go through convert_defined_type. Known gap for anonymous inline enums.
+
+From number_format (NumberFormat, not TypeNode variants):
+- F32 / F64 / ShortU16 — not standard Anchor/Borsh integer scalars in our Type enum. Opaque by design.
+
+No catch-all remains: convert_type is exhaustive over TypeNode.
+
+=== What was added ===
+- Hidden CLI: `idl-drift inspect <IDL.json>` (exit 0=fully mapped, 1=any reachable Generic, 2=io/parse)
+- fixtures/real/README.md — how to drop Vixen Codama IDLs (tests/idls/*.json) or produce via codama
+- scripts/inspect-real.sh — batch inspect; final "N/M real IDLs fully mapped"
+- src/inspect.rs — coverage walk over ix args + reachable type fields
+- convert_type — explicit Map/Set/Tuple/Struct/Enum arms with comments (no invented layout mappings)
+
+diff.rs classification logic unchanged (only made reachable_types pub).

@@ -1,0 +1,55 @@
+services:
+  # Read-only HTTP/WS over SQLite — no geyser credentials required.
+  demo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: sqlite:/data/index.db
+    volumes:
+      - index-data:/data
+    command:
+      - demo
+      - --db
+      - sqlite:/data/index.db
+      - --bind
+      - 0.0.0.0:8080
+
+  # Live geyser ingest — requires .env with YELLOWSTONE_ENDPOINT (and optional auth token).
+  indexer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      YELLOWSTONE_ENDPOINT: ${YELLOWSTONE_ENDPOINT:-}
+      YELLOWSTONE_AUTH_TOKEN: ${YELLOWSTONE_AUTH_TOKEN:-}
+      DATABASE_URL: sqlite:/data/index.db
+    volumes:
+      - index-data:/data
+      - ./idls:/app/idls
+      # Optional: copy index.example.yaml to index.yaml, set geyser fields, then uncomment:
+      # - ./index.yaml:/app/index.yaml:ro
+    # Default: CLI flags from .env (see .env.example).
+    # With index.yaml mounted above, replace command with:
+    #   run --config /app/index.yaml --db sqlite:/data/index.db
+    command:
+      - run
+      - --endpoint
+      - ${YELLOWSTONE_ENDPOINT:?set YELLOWSTONE_ENDPOINT in .env}
+      - --auth-token
+      - ${YELLOWSTONE_AUTH_TOKEN:-}
+      - --idl-dir
+      - /app/idls
+      - --bind
+      - 0.0.0.0:8080
+      - --db
+      - sqlite:/data/index.db
+
+volumes:
+  index-data:

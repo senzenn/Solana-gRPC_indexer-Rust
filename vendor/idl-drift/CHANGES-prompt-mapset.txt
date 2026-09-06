@@ -1,0 +1,78 @@
+# CHANGES — Map/Set/Tuple structural Type variants
+
+## Confirmations
+- cargo test: **24/24** passed (19 prior + 5 new Map/Set/Tuple tests)
+- cargo clippy pedantic: clean
+- scripts/manual-test.sh: 14/14 pairs still pass (verified during development)
+- Did NOT add Type::InlineStruct / Type::InlineEnum
+- Classification logic in diff_types/diff_fields/classify_field unchanged
+
+## TypeNode variants STILL mapping to Type::Generic
+1. **Struct (inline as field type)** / **Enum (inline as field type)** — residual known gap.
+   Comment in convert_type:
+   > Residual known gap: inline struct/enum used *as a field type*
+   > (anonymous composite). Top-level account data / definedTypes already
+   > promote to TypeDef via convert_defined_type / account_as_type_def.
+   > Representing anonymous inlines needs Type::InlineStruct/InlineEnum
+   > (or synthetic Defined names) — left Generic until that lands. Real
+   > Vixen Codama IDLs almost always Link to definedTypes instead.
+2. **NumberFormat::F32 / F64 / ShortU16** — not standard Anchor/Borsh integer
+   scalars in our Type enum; opaque by design.
+
+Map, Set, and Tuple no longer fall through to Generic.
+
+## cargo test 2>&1
+   Compiling idl-drift v0.1.0 (/Users/senzenn/oss/idl-drift)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.88s
+     Running unittests src/lib.rs (target/debug/deps/idl_drift-4d93776d8930b2e3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/idl_drift-ebf0009f993bd27c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/diff_tests.rs (target/debug/deps/diff_tests-35e7c0f2023bc210)
+
+running 24 tests
+test event_envelope_length_8_to_1_is_breaking ... ok
+test alias_target_change_is_breaking ... ok
+test default_omission_produces_no_changes ... ok
+test disambiguation_order_change_is_dangerous ... ok
+test enum_middle_insert_is_breaking ... ok
+test duplicate_instruction_name_is_flagged ... ok
+test amm_pool_field_width_is_breaking ... ok
+test enum_append_is_dangerous_not_breaking ... ok
+test codama_events_are_top_level_with_discriminator ... ok
+test codama_order_engine_self_diff_is_empty ... ok
+test event_only_type_field_change_is_breaking ... ok
+test map_defined_value_stays_reachable ... ok
+test map_value_widen_on_reachable_field_is_breaking ... ok
+test missing_discriminator_deserializes_and_is_stable ... ok
+test generic_arg_change_is_breaking ... ok
+test same_disc_different_account_count_is_not_breaking ... ok
+test same_disc_same_account_count_is_breaking ... ok
+test set_element_change_is_breaking ... ok
+test truly_dead_type_change_is_cosmetic ... ok
+test unchanged_map_set_tuple_is_no_change ... ok
+test tuple_element_reorder_is_breaking ... ok
+test serialization_mode_change_is_breaking ... ok
+test unreachable_type_change_is_not_breaking ... ok
+test same_discriminator_two_encodings_is_no_change ... ok
+
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests idl_drift
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+## cargo clippy --all-targets -- -W clippy::pedantic 2>&1
+    Checking idl-drift v0.1.0 (/Users/senzenn/oss/idl-drift)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.41s

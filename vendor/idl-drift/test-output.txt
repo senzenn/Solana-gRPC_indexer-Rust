@@ -1,0 +1,38 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running unittests src/lib.rs (target/debug/deps/idl_drift-5d1ae30f611037e4)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/idl_drift-511fccb8654176f8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/diff_tests.rs (target/debug/deps/diff_tests-0d677b290c1e9a45)
+
+running 13 tests
+test alias_target_change_is_breaking ... ok
+test event_envelope_length_8_to_1_is_breaking ... ok
+test default_omission_produces_no_changes ... ok
+test duplicate_instruction_name_is_flagged ... ok
+test enum_append_is_dangerous_not_breaking ... ok
+test generic_arg_change_is_breaking ... ok
+test missing_discriminator_deserializes_and_is_stable ... ok
+test enum_middle_insert_is_breaking ... ok
+test amm_pool_field_width_is_breaking ... ok
+test codama_order_engine_self_diff_is_empty ... ok
+test codama_events_are_top_level_with_discriminator ... ok
+test serialization_mode_change_is_breaking ... ok
+test unreachable_type_change_is_not_breaking ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests idl_drift
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

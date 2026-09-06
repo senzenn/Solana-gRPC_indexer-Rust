@@ -1,0 +1,3 @@
+IX|f|disc=1
+IXARG|f#0|name=b;type=u32
+IXARG|f#1|name=a;type=u64

@@ -1,0 +1,3 @@
+IX|g|disc=1
+IXACCT|g#0|name=a;writable=0;signer=0;optional=1
+IXACCT|g#1|name=b;writable=1;signer=0

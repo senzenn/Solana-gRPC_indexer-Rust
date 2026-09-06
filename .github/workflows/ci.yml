@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo build
+        run: cargo build --bin index
+
+      - name: cargo test
+        run: cargo test
+
+      - name: cargo clippy
+        run: cargo clippy --bin index -- -D warnings
+
+      - name: Validate example config
+        run: |
+          sed 's/endpoint: ""/endpoint: "https:\/\/geyser.example.invalid"/' index.example.yaml > /tmp/index.ci.yaml
+          cargo run -- config validate --file /tmp/index.ci.yaml

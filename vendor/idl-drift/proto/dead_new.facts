@@ -1,0 +1,4 @@
+IX|swap|disc=248,198,158,145,225,117,135,200
+IXARG|swap#0|name=amountIn;type=u64
+TYPE|DeadType|kind=struct;serialization=borsh
+FIELD|DeadType#0|name=unused;type=u64

@@ -1,0 +1,6 @@
+IX|trade|disc=5,5,5,5,5,5,5,5
+IXACCTGROUP|trade#0|name=market
+IXACCT|trade#0.0|name=bids;writable=1;signer=0
+IXACCT|trade#0.1|name=asks;writable=1;signer=0
+IXACCT|trade#0.2|name=eventQueue;writable=1;signer=0
+IXACCT|trade#1|name=payer;writable=1;signer=1

@@ -1,0 +1,25 @@
+{
+  "address": "OptMid1111111111111111111111111111111111",
+  "metadata": {
+    "name": "swap",
+    "version": "1.0.0",
+    "spec": "0.1.0"
+  },
+  "instructions": [
+    {
+      "name": "swap",
+      "discriminator": [1, 2, 3, 4, 5, 6, 7, 8],
+      "accounts": [
+        { "name": "pool", "writable": true },
+        { "name": "referral", "optional": true },
+        { "name": "user", "signer": true },
+        { "name": "tokenProgram" }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [],
+  "events": [],
+  "errors": [],
+  "types": []
+}

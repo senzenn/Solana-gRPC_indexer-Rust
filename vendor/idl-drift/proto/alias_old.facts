@@ -1,0 +1,4 @@
+IX|x|disc=1
+IXARG|x#0|name=amt;type=Defined:Amount
+TYPE|Amount|kind=type;serialization=borsh
+ALIAS|Amount|target=u64

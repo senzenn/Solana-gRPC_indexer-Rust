@@ -1,0 +1,5 @@
+# Real IDLs dropped for local validation (keep README tracked).
+integration/real/*.json
+
+# Vixen fixtures copied locally for validation (keep README tracked).
+vixen-integration/idls/*.json

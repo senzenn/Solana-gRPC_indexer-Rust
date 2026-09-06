@@ -1,7 +1,8 @@
 # Rust
 /target/
 **/*.rs.bk
-Cargo.lock
+# lockfile is kept for the binary
+# Cargo.lock
 
 # IDE
 .vscode/

@@ -1,0 +1,37 @@
+{
+  "address": "AnchorMig11111111111111111111111111111111",
+  "metadata": {
+    "name": "vault",
+    "version": "0.1.0",
+    "spec": "0.1.0"
+  },
+  "instructions": [
+    {
+      "name": "deposit",
+      "accounts": [
+        { "name": "vault", "writable": true },
+        { "name": "user", "signer": true }
+      ],
+      "args": [
+        { "name": "amount", "type": "u64" }
+      ]
+    }
+  ],
+  "accounts": [
+    { "name": "Vault" }
+  ],
+  "events": [],
+  "errors": [],
+  "types": [
+    {
+      "name": "Vault",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "authority", "type": "pubkey" },
+          { "name": "balance", "type": "u64" }
+        ]
+      }
+    }
+  ]
+}

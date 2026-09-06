@@ -1,0 +1,6 @@
+IX|update|disc=9,9,9,9,9,9,9,9
+IXARG|update#0|name=cfg;type=Defined:Mode
+TYPE|Mode|kind=enum;serialization=borsh
+VARIANT|Mode#0|name=Fast
+VARIANT|Mode#1|name=Paused
+VARIANT|Mode#2|name=Slow

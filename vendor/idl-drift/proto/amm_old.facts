@@ -1,0 +1,9 @@
+IX|swap|disc=248,198,158,145,225,117,135,200
+IXACCT|swap#0|name=pool;writable=1;signer=0
+IXACCT|swap#1|name=user;writable=0;signer=1
+IXARG|swap#0|name=amountIn;type=u64
+IXARG|swap#1|name=minOut;type=u64
+ACCT|Pool|disc=116,210,187,119,196,196,52,137
+TYPE|Pool|kind=struct;serialization=borsh
+FIELD|Pool#0|name=authority;type=pubkey
+FIELD|Pool#1|name=feeBps;type=u16

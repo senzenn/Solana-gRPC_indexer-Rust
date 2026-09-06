@@ -1,0 +1,5 @@
+IX|swap|disc=248,198,158,145,225,117,135,200
+IXARG|swap#0|name=params;type=Defined:SwapParams
+TYPE|SwapParams|kind=struct;serialization=borsh
+FIELD|SwapParams#0|name=amountIn;type=u64
+FIELD|SwapParams#1|name=slippageBps;type=u16

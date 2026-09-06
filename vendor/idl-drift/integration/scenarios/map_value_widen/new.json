@@ -1,0 +1,33 @@
+{
+  "address": "MapWide111111111111111111111111111111111",
+  "metadata": {
+    "name": "ledger",
+    "version": "1.1.0",
+    "spec": "0.1.0"
+  },
+  "instructions": [],
+  "accounts": [
+    {
+      "name": "Vault",
+      "discriminator": [9, 9, 9, 9, 9, 9, 9, 9]
+    }
+  ],
+  "events": [],
+  "errors": [],
+  "types": [
+    {
+      "name": "Vault",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "balances",
+            "type": {
+              "map": ["pubkey", "u128"]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

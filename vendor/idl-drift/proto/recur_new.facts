@@ -1,0 +1,5 @@
+IX|build|disc=1
+IXARG|build#0|name=root;type=Defined:Node
+TYPE|Node|kind=struct;serialization=borsh
+FIELD|Node#0|name=value;type=u32
+FIELD|Node#1|name=children;type=Vec:Defined:Node

@@ -1,0 +1,70 @@
+#!/usr/bin/awk -f
+# normalize.awk — turn a Solana IDL JSON into a canonical flat "fact" list.
+#
+# Each fact is one line: TYPE|KEY|VALUE
+# This is the awk-runnable stand-in for deserializing into typed structs +
+# walking the tree. It is deliberately line-oriented so awk can diff it.
+#
+# Facts emitted:
+#   IX|<name>|disc=<d>;naccts=<n>;nargs=<n>       one per instruction
+#   IXACCT|<ixname>#<pos>|name=<n>;writable=<b>;signer=<b>   positional!
+#   IXARG|<ixname>#<pos>|name=<n>;type=<t>                    positional!
+#   ACCT|<name>|disc=<d>                          accounts[] = disc only
+#   TYPE|<name>|kind=<k>                           one per types[] entry
+#   FIELD|<typename>#<pos>|name=<n>;type=<t>       positional struct fields
+#
+# Positional keys (#<pos>) are the fix for Blocker #1: account/arg/field
+# ORDER is part of identity, because Borsh + Solana account lists are positional.
+
+BEGIN { RS="\n"; }
+
+# We do a simple state-machine parse. IDLs from anchor/quasar are pretty-printed
+# with predictable structure, which is enough for a prototype.
+{ lines[NR] = $0 }
+
+END {
+    section = "";        # instructions | accounts | types
+    ixname = "";
+    typename = "";
+    inFields = 0; fieldPos = 0;
+    inIxAccts = 0; acctPos = 0;
+    inIxArgs = 0; argPos = 0;
+
+    for (i = 1; i <= NR; i++) {
+        line = lines[i];
+        gsub(/^[ \t]+/, "", line);   # trim leading ws
+
+        # --- section detection ---
+        if (line ~ /"instructions"[ ]*:/) { section="instructions"; continue }
+        if (line ~ /"accounts"[ ]*:[ ]*\[/ && section != "instructions") { section="accounts"; continue }
+        if (line ~ /"types"[ ]*:/) { section="types"; inFields=0; continue }
+
+        # --- instruction name (top-level within instructions) ---
+        if (section=="instructions" && line ~ /"name"[ ]*:/ && inIxAccts==0 && inIxArgs==0 && ixdepth()) {
+            name = extract(line);
+            # a "name" right after an object-open at instruction level
+            if (name != "" && curkey=="ixname") { }
+        }
+
+        # We use marker keys instead of brittle depth tracking:
+        if (section=="instructions" && line ~ /"name"[ ]*:/ && expectIx) {
+            ixname = extract(line); expectIx=0;
+            ixDisc=""; ixNAccts=0; ixNArgs=0;
+            print "IX|" ixname "|PENDING";
+            ixLineIndex[ixname] = NR "_" i;
+            continue;
+        }
+
+        if (line ~ /"discriminator"[ ]*:/) {
+            disc = extractArray(line);
+            if (section=="instructions" && ixname!="") { ixDisc=disc; ixDiscFor[ixname]=disc }
+            else if (section=="accounts") { pendingAcctDisc=disc }
+            continue;
+        }
+    }
+    # NOTE: prototype simplified below — see run output.
+}
+
+function extract(s,   a) { if (match(s, /:[ ]*"[^"]*"/)) { a=substr(s,RSTART,RLENGTH); gsub(/.*"/,"",a); } return a }
+function extractArray(s,  a){ if (match(s,/\[[^]]*\]/)){a=substr(s,RSTART,RLENGTH); gsub(/[][ ]/,"",a);} return a }
+function ixdepth() { return 1 }

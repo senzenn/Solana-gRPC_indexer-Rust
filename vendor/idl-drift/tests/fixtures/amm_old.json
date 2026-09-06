@@ -1,0 +1,33 @@
+{
+  "address": "9GCBb4NsSDRuEkkGfQkN37oppmMVPops5sXDWhAKAvQQ",
+  "metadata": { "name": "amm", "version": "0.1.0", "spec": "0.1.0" },
+  "instructions": [
+    {
+      "name": "swap",
+      "discriminator": [248, 198, 158, 145, 225, 117, 135, 200],
+      "accounts": [
+        { "name": "pool", "writable": true },
+        { "name": "user", "signer": true }
+      ],
+      "args": [
+        { "name": "amountIn", "type": "u64" },
+        { "name": "minOut", "type": "u64" }
+      ]
+    }
+  ],
+  "accounts": [
+    { "name": "Pool", "discriminator": [116, 210, 187, 119, 196, 196, 52, 137] }
+  ],
+  "types": [
+    {
+      "name": "Pool",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "authority", "type": "pubkey" },
+          { "name": "feeBps", "type": "u16" }
+        ]
+      }
+    }
+  ]
+}

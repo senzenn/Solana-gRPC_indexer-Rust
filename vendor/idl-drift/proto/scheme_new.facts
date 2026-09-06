@@ -1,0 +1,2 @@
+IX|increment|disc=0
+IXARG|increment#0|name=amount;type=u64

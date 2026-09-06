@@ -1,0 +1,196 @@
+# CHANGES — limit_order v1→v2 envelope capture
+
+## Confirmations
+- **Event-envelope capture needed a fix:** YES. Previously `envelope_discriminator`
+  was always empty for Codama events (comment claimed envelope was parser-only).
+  Now `HiddenPrefixTypeNode.prefix` → `envelope_discriminator` +
+  `envelope_payload_offset = prefix.len()`. Content disc still from
+  `discriminators[]`. Payload fields still via `unwrap_wrappers`.
+- cargo test: **26/26** passed (incl. `limit_order_v1_to_v2_is_breaking`,
+  `limit_order_idls_have_no_unexpected_generics`)
+- clippy pedantic: clean
+- manual-test.sh: 14/14
+- No FINDINGS.md gaps for the required assertions (all fired). No `#[ignore]`.
+- v2 `fillOrder.swapData` → `Type::Bytes` (sizePrefix over bytes); both IDLs Generic=0
+
+## limit_order v1→v2 findings (grouped)
+
+### BREAKING (99)
+[BREAKING] account changed at fixed position (cancelOrder#0): Leaf { name: "order", writable: true, signer: false, optional: false } -> Leaf { name: "signer", writable: false, signer: true, optional: false }
+[BREAKING] account changed at fixed position (cancelOrder#1): Leaf { name: "reserve", writable: true, signer: false, optional: false } -> Leaf { name: "maker", writable: true, signer: false, optional: false }
+[BREAKING] account changed at fixed position (cancelOrder#2): Leaf { name: "maker", writable: true, signer: true, optional: false } -> Leaf { name: "order", writable: true, signer: false, optional: false }
+[BREAKING] account changed at fixed position (cancelOrder#3): Leaf { name: "makerInputAccount", writable: true, signer: false, optional: false } -> Leaf { name: "inputMintReserve", writable: true, signer: false, optional: false }
+[BREAKING] account changed at fixed position (cancelOrder#4): Leaf { name: "systemProgram", writable: false, signer: false, optional: false } -> Leaf { name: "makerInputMintAccount", writable: true, signer: false, optional: true }
+[BREAKING] account changed at fixed position (cancelOrder#5): Leaf { name: "tokenProgram", writable: false, signer: false, optional: false } -> Leaf { name: "inputMint", writable: false, signer: false, optional: false }
+[BREAKING] account changed at fixed position (cancelOrder#6): Leaf { name: "inputMint", writable: false, signer: false, optional: true } -> Leaf { name: "inputTokenProgram", writable: false, signer: false, optional: false }
+[BREAKING] account changed at fixed position (fillOrder#0): Leaf { name: "order", writable: true, signer: false, optional: false } -> Leaf { name: "taker", writable: true, signer: true, optional: false }
+[BREAKING] account changed at fixed position (fillOrder#1): Leaf { name: "reserve", writable: true, signer: false, optional: false } -> Leaf { name: "maker", writable: true, signer: false, optional: false }
+[BREAKING] account changed at fixed position (fillOrder#2): Leaf { name: "maker", writable: true, signer: false, optional: false } -> Leaf { name: "order", writable: true, signer: false, optional: false }
+[BREAKING] account changed at fixed position (fillOrder#3): Leaf { name: "taker", writable: false, signer: true, optional: false } -> Leaf { name: "takerInputMintAccount", writable: true, signer: false, optional: false }
+[BREAKING] account changed at fixed position (fillOrder#4): Leaf { name: "takerOutputAccount", writable: true, signer: false, optional: false } -> Leaf { name: "takerOutputMintAccount", writable: true, signer: false, optional: false }
+[BREAKING] account changed at fixed position (fillOrder#5): Leaf { name: "makerOutputAccount", writable: true, signer: false, optional: false } -> Leaf { name: "makerOutputMintAccount", writable: true, signer: false, optional: true }
+[BREAKING] account changed at fixed position (fillOrder#6): Leaf { name: "takerInputAccount", writable: true, signer: false, optional: false } -> Leaf { name: "feeAccount", writable: true, signer: false, optional: false }
+[BREAKING] account changed at fixed position (fillOrder#7): Leaf { name: "feeAuthority", writable: false, signer: false, optional: false } -> Leaf { name: "orderInputMintAccount", writable: true, signer: false, optional: false }
+[BREAKING] account changed at fixed position (fillOrder#8): Leaf { name: "programFeeAccount", writable: true, signer: false, optional: false } -> Leaf { name: "inputMint", writable: false, signer: false, optional: false }
+[BREAKING] account changed at fixed position (fillOrder#9): Leaf { name: "referral", writable: true, signer: false, optional: true } -> Leaf { name: "inputTokenProgram", writable: false, signer: false, optional: false }
+[BREAKING] account changed at fixed position (fillOrder#10): Leaf { name: "tokenProgram", writable: false, signer: false, optional: false } -> Leaf { name: "outputMint", writable: false, signer: false, optional: false }
+[BREAKING] account changed at fixed position (fillOrder#11): Leaf { name: "systemProgram", writable: false, signer: false, optional: false } -> Leaf { name: "outputTokenProgram", writable: false, signer: false, optional: false }
+[BREAKING] arg changed (fillOrder#0): u64 -> u64 (Borsh layout)
+[BREAKING] arg changed (fillOrder#1): u64 -> bytes (Borsh layout)
+[BREAKING] account changed at fixed position (flashFillOrder#0): Leaf { name: "order", writable: true, signer: false, optional: false } -> Leaf { name: "taker", writable: true, signer: true, optional: false }
+[BREAKING] account changed at fixed position (flashFillOrder#1): Leaf { name: "reserve", writable: true, signer: false, optional: false } -> Leaf { name: "maker", writable: true, signer: false, optional: false }
+[BREAKING] account changed at fixed position (flashFillOrder#2): Leaf { name: "maker", writable: true, signer: false, optional: false } -> Leaf { name: "order", writable: true, signer: false, optional: false }
+[BREAKING] account changed at fixed position (flashFillOrder#3): Leaf { name: "taker", writable: false, signer: true, optional: false } -> Leaf { name: "inputMintReserve", writable: true, signer: false, optional: false }
+[BREAKING] account changed at fixed position (flashFillOrder#4): Leaf { name: "makerOutputAccount", writable: true, signer: false, optional: false } -> Leaf { name: "makerOutputMintAccount", writable: true, signer: false, optional: true }
+[BREAKING] account changed at fixed position (flashFillOrder#5): Leaf { name: "takerInputAccount", writable: true, signer: false, optional: false } -> Leaf { name: "takerOutputMintAccount", writable: true, signer: false, optional: true }
+[BREAKING] account changed at fixed position (flashFillOrder#6): Leaf { name: "feeAuthority", writable: false, signer: false, optional: false } -> Leaf { name: "feeAccount", writable: true, signer: false, optional: false }
+[BREAKING] account changed at fixed position (flashFillOrder#7): Leaf { name: "programFeeAccount", writable: true, signer: false, optional: false } -> Leaf { name: "inputTokenProgram", writable: false, signer: false, optional: false }
+[BREAKING] account changed at fixed position (flashFillOrder#8): Leaf { name: "referral", writable: true, signer: false, optional: true } -> Leaf { name: "outputMint", writable: false, signer: false, optional: false }
+[BREAKING] account changed at fixed position (flashFillOrder#9): Leaf { name: "inputMint", writable: false, signer: false, optional: false } -> Leaf { name: "outputTokenProgram", writable: false, signer: false, optional: false }
+[BREAKING] account changed at fixed position (flashFillOrder#10): Leaf { name: "inputMintTokenProgram", writable: false, signer: false, optional: false } -> Leaf { name: "systemProgram", writable: false, signer: false, optional: false }
+[BREAKING] account changed at fixed position (flashFillOrder#11): Leaf { name: "outputMint", writable: false, signer: false, optional: false } -> Leaf { name: "eventAuthority", writable: false, signer: false, optional: false }
+[BREAKING] account changed at fixed position (flashFillOrder#12): Leaf { name: "outputMintTokenProgram", writable: false, signer: false, optional: false } -> Leaf { name: "program", writable: false, signer: false, optional: false }
+[BREAKING] account removed from instruction (flashFillOrder#13): positions shift
+[BREAKING] account changed at fixed position (initializeOrder#0): Leaf { name: "base", writable: false, signer: true, optional: false } -> Leaf { name: "payer", writable: true, signer: true, optional: false }
+[BREAKING] account changed at fixed position (initializeOrder#1): Leaf { name: "maker", writable: true, signer: true, optional: false } -> Leaf { name: "maker", writable: false, signer: true, optional: false }
+[BREAKING] account changed at fixed position (initializeOrder#3): Leaf { name: "reserve", writable: true, signer: false, optional: false } -> Leaf { name: "inputMintReserve", writable: true, signer: false, optional: false }
+[BREAKING] account changed at fixed position (initializeOrder#4): Leaf { name: "makerInputAccount", writable: true, signer: false, optional: false } -> Leaf { name: "makerInputMintAccount", writable: true, signer: false, optional: false }
+[BREAKING] account changed at fixed position (initializeOrder#5): Leaf { name: "inputMint", writable: false, signer: false, optional: false } -> Leaf { name: "fee", writable: false, signer: false, optional: false }
+[BREAKING] account changed at fixed position (initializeOrder#6): Leaf { name: "makerOutputAccount", writable: false, signer: false, optional: false } -> Leaf { name: "referral", writable: false, signer: false, optional: true }
+[BREAKING] account changed at fixed position (initializeOrder#7): Leaf { name: "referral", writable: false, signer: false, optional: true } -> Leaf { name: "inputMint", writable: false, signer: false, optional: false }
+[BREAKING] account changed at fixed position (initializeOrder#9): Leaf { name: "systemProgram", writable: false, signer: false, optional: false } -> Leaf { name: "inputTokenProgram", writable: false, signer: false, optional: false }
+[BREAKING] account changed at fixed position (initializeOrder#10): Leaf { name: "tokenProgram", writable: false, signer: false, optional: false } -> Leaf { name: "outputTokenProgram", writable: false, signer: false, optional: false }
+[BREAKING] account changed at fixed position (initializeOrder#11): Leaf { name: "rent", writable: false, signer: false, optional: false } -> Leaf { name: "systemProgram", writable: false, signer: false, optional: false }
+[BREAKING] arg changed (initializeOrder#0): u64 -> u64 (Borsh layout)
+[BREAKING] arg changed (initializeOrder#1): u64 -> u64 (Borsh layout)
+[BREAKING] arg changed (initializeOrder#2): Option:i64 -> u64 (Borsh layout)
+[BREAKING] new arg (initializeOrder#3): Borsh layout grows
+[BREAKING] new arg (initializeOrder#4): Borsh layout grows
+[BREAKING] new arg (initializeOrder#5): Borsh layout grows
+[BREAKING] account changed at fixed position (preFlashFillOrder#0): Leaf { name: "order", writable: true, signer: false, optional: false } -> Leaf { name: "taker", writable: false, signer: true, optional: false }
+[BREAKING] account changed at fixed position (preFlashFillOrder#1): Leaf { name: "reserve", writable: true, signer: false, optional: false } -> Leaf { name: "order", writable: true, signer: false, optional: false }
+[BREAKING] account changed at fixed position (preFlashFillOrder#2): Leaf { name: "taker", writable: false, signer: true, optional: false } -> Leaf { name: "inputMintReserve", writable: true, signer: false, optional: false }
+[BREAKING] account changed at fixed position (preFlashFillOrder#3): Leaf { name: "takerOutputAccount", writable: true, signer: false, optional: false } -> Leaf { name: "takerInputMintAccount", writable: true, signer: false, optional: false }
+[BREAKING] account changed at fixed position (preFlashFillOrder#5): Leaf { name: "inputMintTokenProgram", writable: false, signer: false, optional: false } -> Leaf { name: "inputTokenProgram", writable: false, signer: false, optional: false }
+[BREAKING] account removed from instruction (preFlashFillOrder#7): positions shift
+[BREAKING] account changed at fixed position (updateFee#0): Leaf { name: "keeper", writable: true, signer: true, optional: false } -> Leaf { name: "admin", writable: true, signer: true, optional: false }
+[BREAKING] arg changed (updateFee#0): u64 -> u16 (Borsh layout)
+[BREAKING] arg changed (updateFee#1): u64 -> u16 (Borsh layout)
+[BREAKING] arg removed (updateFee#2)
+[BREAKING] arg removed (updateFee#3)
+[BREAKING] account changed at fixed position (withdrawFee#3): Leaf { name: "adminTokenAcocunt", writable: true, signer: false, optional: false } -> Leaf { name: "destinationTokenAccount", writable: true, signer: false, optional: false }
+[BREAKING] arg removed (withdrawFee#0)
+[BREAKING] instruction removed: cancelExpiredOrder
+[BREAKING] instruction removed: initFee
+[BREAKING] event envelope discriminator LENGTH changed (cancelOrderEvent): 0->8 bytes (scheme swap, e.g. Anchor 8-byte <-> Pinocchio 1-byte)
+[BREAKING] event envelope discriminator LENGTH changed (createOrderEvent): 0->8 bytes (scheme swap, e.g. Anchor 8-byte <-> Pinocchio 1-byte)
+[BREAKING] event envelope discriminator LENGTH changed (tradeEvent): 0->8 bytes (scheme swap, e.g. Anchor 8-byte <-> Pinocchio 1-byte)
+[BREAKING] FIELD changed (createOrderEvent#4) via reachable type: u64 -> pubkey (Borsh layout)
+[BREAKING] FIELD changed (createOrderEvent#5) via reachable type: u64 -> pubkey (Borsh layout)
+[BREAKING] FIELD changed (createOrderEvent#6) via reachable type: Option:i64 -> u64 (Borsh layout)
+[BREAKING] FIELD changed (createOrderEvent#7) via reachable type: absent -> added (Borsh layout)
+[BREAKING] FIELD changed (createOrderEvent#8) via reachable type: absent -> added (Borsh layout)
+[BREAKING] FIELD changed (createOrderEvent#9) via reachable type: absent -> added (Borsh layout)
+[BREAKING] FIELD changed (createOrderEvent#10) via reachable type: absent -> added (Borsh layout)
+[BREAKING] FIELD changed (createOrderEvent#11) via reachable type: absent -> added (Borsh layout)
+[BREAKING] FIELD changed (fee#0) via reachable type: u64 -> u16 (Borsh layout)
+[BREAKING] FIELD changed (fee#1) via reachable type: u64 -> u16 (Borsh layout)
+[BREAKING] FIELD changed (fee#2) via reachable type: present -> removed (Borsh layout)
+[BREAKING] FIELD changed (fee#3) via reachable type: present -> removed (Borsh layout)
+[BREAKING] FIELD changed (order#3) via reachable type: bool -> pubkey (Borsh layout)
+[BREAKING] FIELD changed (order#4) via reachable type: u64 -> pubkey (Borsh layout)
+[BREAKING] FIELD changed (order#5) via reachable type: u64 -> pubkey (Borsh layout)
+[BREAKING] FIELD changed (order#6) via reachable type: u64 -> u64 (Borsh layout)
+[BREAKING] FIELD changed (order#7) via reachable type: u64 -> u64 (Borsh layout)
+[BREAKING] FIELD changed (order#8) via reachable type: pubkey -> u64 (Borsh layout)
+[BREAKING] FIELD changed (order#9) via reachable type: pubkey -> u64 (Borsh layout)
+[BREAKING] FIELD changed (order#10) via reachable type: pubkey -> u64 (Borsh layout)
+[BREAKING] FIELD changed (order#13) via reachable type: pubkey -> u16 (Borsh layout)
+[BREAKING] FIELD changed (order#14) via reachable type: Option:pubkey -> pubkey (Borsh layout)
+[BREAKING] FIELD changed (order#15) via reachable type: absent -> added (Borsh layout)
+[BREAKING] FIELD changed (order#16) via reachable type: absent -> added (Borsh layout)
+[BREAKING] FIELD changed (order#17) via reachable type: absent -> added (Borsh layout)
+[BREAKING] FIELD changed (order#18) via reachable type: absent -> added (Borsh layout)
+[BREAKING] FIELD changed (tradeEvent#2) via reachable type: u64 -> u64 (Borsh layout)
+[BREAKING] FIELD changed (tradeEvent#3) via reachable type: u64 -> u64 (Borsh layout)
+[BREAKING] FIELD changed (tradeEvent#4) via reachable type: u64 -> u64 (Borsh layout)
+[BREAKING] FIELD changed (tradeEvent#5) via reachable type: u64 -> u64 (Borsh layout)
+
+### DANGEROUS (10)
+[DANGEROUS] new account on instruction (cancelOrder#7): shifts count/positions -> check_min_accounts_req expects more
+[DANGEROUS] new account on instruction (cancelOrder#8): shifts count/positions -> check_min_accounts_req expects more
+[DANGEROUS] new account on instruction (fillOrder#12): shifts count/positions -> check_min_accounts_req expects more
+[DANGEROUS] new account on instruction (fillOrder#13): shifts count/positions -> check_min_accounts_req expects more
+[DANGEROUS] new account on instruction (fillOrder#14): shifts count/positions -> check_min_accounts_req expects more
+[DANGEROUS] new account on instruction (fillOrder#15): shifts count/positions -> check_min_accounts_req expects more
+[DANGEROUS] new account on instruction (initializeOrder#12): shifts count/positions -> check_min_accounts_req expects more
+[DANGEROUS] new account on instruction (initializeOrder#13): shifts count/positions -> check_min_accounts_req expects more
+[DANGEROUS] new account on instruction (initializeOrder#14): shifts count/positions -> check_min_accounts_req expects more
+[DANGEROUS] new account on instruction (updateFee#2): shifts count/positions -> check_min_accounts_req expects more
+
+### ADDITIVE (2)
+[ADDITIVE] new instruction: cancelDustOrder
+[ADDITIVE] new event type: cancelDustOrderEvent
+
+### COSMETIC (0)
+
+summary: 99 breaking, 10 dangerous, 2 additive, 0 cosmetic
+exit code: 1
+
+## cargo test 2>&1
+   Compiling idl-drift v0.1.0 (/Users/senzenn/oss/idl-drift)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.30s
+     Running unittests src/lib.rs (target/debug/deps/idl_drift-4d93776d8930b2e3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/idl_drift-ebf0009f993bd27c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/diff_tests.rs (target/debug/deps/diff_tests-35e7c0f2023bc210)
+
+running 26 tests
+test duplicate_instruction_name_is_flagged ... ok
+test default_omission_produces_no_changes ... ok
+test event_envelope_length_8_to_1_is_breaking ... ok
+test alias_target_change_is_breaking ... ok
+test disambiguation_order_change_is_dangerous ... ok
+test enum_middle_insert_is_breaking ... ok
+test amm_pool_field_width_is_breaking ... ok
+test enum_append_is_dangerous_not_breaking ... ok
+test event_only_type_field_change_is_breaking ... ok
+test codama_order_engine_self_diff_is_empty ... ok
+test codama_events_are_top_level_with_discriminator ... ok
+test generic_arg_change_is_breaking ... ok
+test map_defined_value_stays_reachable ... ok
+test map_value_widen_on_reachable_field_is_breaking ... ok
+test same_disc_different_account_count_is_not_breaking ... ok
+test same_disc_same_account_count_is_breaking ... ok
+test missing_discriminator_deserializes_and_is_stable ... ok
+test set_element_change_is_breaking ... ok
+test tuple_element_reorder_is_breaking ... ok
+test truly_dead_type_change_is_cosmetic ... ok
+test unchanged_map_set_tuple_is_no_change ... ok
+test serialization_mode_change_is_breaking ... ok
+test unreachable_type_change_is_not_breaking ... ok
+test same_discriminator_two_encodings_is_no_change ... ok
+test limit_order_v1_to_v2_is_breaking ... ok
+test limit_order_idls_have_no_unexpected_generics ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+   Doc-tests idl_drift
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+## cargo clippy --all-targets -- -W clippy::pedantic 2>&1
+    Checking idl-drift v0.1.0 (/Users/senzenn/oss/idl-drift)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.47s

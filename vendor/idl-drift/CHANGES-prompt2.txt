@@ -1,0 +1,77 @@
+# CHANGES — prompt2: discriminator encoding normalization
+
+## Summary
+`decode_bytes` in `src/codama_convert.rs` now decodes all Codama `bytesValueNode`
+encodings to the underlying bytes:
+- Base16: hex (unchanged)
+- Base58: `bs58` crate, fallback to raw string bytes on error
+- Base64: `base64` 0.22 STANDARD engine, same fallback
+- Utf8: raw string bytes (the value itself)
+
+Added `decode_encoded_bytes` for tests. Doc comment explains false-positive avoidance
+when the same disc is written as base16 vs base58/base64 across IDL versions
+(Vixen PR #277 / Codama bumps).
+
+## Dependencies
+- `bs58 = "0.5"` → locked `bs58 v0.5.1` (fetched from crates.io; was not fully vendored locally before `cargo fetch`)
+- `base64 = "0.22"` → locked `base64 v0.22.1` (fetched; registry already had sources after fetch)
+
+## Tests
+- `same_discriminator_two_encodings_is_no_change`: unit-checks base16/base58/base64 of
+  `[1,2,3,4]` decode equal, and diffs Codama RootNodes with the same account disc as
+  base16 vs base58 → no breaking, zero discriminator-change entries.
+
+## Test count
+- **17 passed** in `tests/diff_tests.rs` (16 prior + 1 new)
+
+## cargo test 2>&1
+   Compiling idl-drift v0.1.0 (/Users/senzenn/oss/idl-drift)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.73s
+     Running unittests src/lib.rs (target/debug/deps/idl_drift-1ccc677adeb46c9c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/idl_drift-567c11c052ffe730)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/diff_tests.rs (target/debug/deps/diff_tests-3aa605b12e47b197)
+
+running 17 tests
+test event_envelope_length_8_to_1_is_breaking ... ok
+test default_omission_produces_no_changes ... ok
+test alias_target_change_is_breaking ... ok
+test disambiguation_order_change_is_dangerous ... ok
+test codama_order_engine_self_diff_is_empty ... ok
+test codama_events_are_top_level_with_discriminator ... ok
+test duplicate_instruction_name_is_flagged ... ok
+test enum_append_is_dangerous_not_breaking ... ok
+test amm_pool_field_width_is_breaking ... ok
+test enum_middle_insert_is_breaking ... ok
+test missing_discriminator_deserializes_and_is_stable ... ok
+test same_disc_different_account_count_is_not_breaking ... ok
+test same_disc_same_account_count_is_breaking ... ok
+test generic_arg_change_is_breaking ... ok
+test unreachable_type_change_is_not_breaking ... ok
+test serialization_mode_change_is_breaking ... ok
+test same_discriminator_two_encodings_is_no_change ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests idl_drift
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+## cargo clippy --all-targets -- -W clippy::pedantic 2>&1
+    Checking idl-drift v0.1.0 (/Users/senzenn/oss/idl-drift)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.39s
+
+## Clippy
+Warning-clean after adding `#[must_use]` on `decode_bytes`.

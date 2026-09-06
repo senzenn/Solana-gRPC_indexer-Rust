@@ -1,0 +1,57 @@
+# CHANGES — integration sandbox (real-world validation)
+
+## Confirmations
+- clippy pedantic: clean
+- integration/run-all.sh: **6/6 scenarios behaved as expected** (no EXPECTED-FAIL)
+- map_value_widen: PASS (Map/Set structural support already landed)
+- vixen-ci demo_cron.sh (default / breaking fresh): prints `REGENERATION NEEDED: 1 breaking changes`, exit 1
+- vixen-ci demo_cron.sh (fresh_ok): prints `PARSERS OK`, exit 0
+- scripts/manual-test.sh: 14/14 (legacy metadata synthesis tightened so 91_missing_field still exit 2)
+- cargo test: 24 passed (unchanged classification logic)
+
+## Scenario results
+| Scenario | Expected | Result |
+|----------|----------|--------|
+| anchor_029_to_030 | exit 1 Breaking | PASS |
+| account_removed_collision | exit 1 unresolvable collision | PASS |
+| mid_optional_account_removed | exit 1 Breaking | PASS |
+| cpi_event_anchor_to_pinocchio | exit 1 envelope 8→1 | PASS |
+| map_value_widen | exit 1 Breaking | PASS (not pending) |
+| truncated_idl | exit 2 | PASS |
+
+No scenarios marked EXPECTED-FAIL pending map/set.
+
+## cargo clippy --all-targets -- -W clippy::pedantic 2>&1
+    Checking idl-drift v0.1.0 (/Users/senzenn/oss/idl-drift)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.55s
+
+## bash integration/run-all.sh 2>&1
+== idl-drift integration scenarios ==
+
+anchor_029_to_030: exit=1 PASS
+account_removed_collision: exit=1 PASS
+mid_optional_account_removed: exit=1 PASS
+cpi_event_anchor_to_pinocchio: exit=1 PASS
+map_value_widen: exit=1 PASS
+truncated_idl: exit=2 PASS
+
+== inspect integration/real/*.json (if any) ==
+(none present — see integration/real/README.md)
+
+6/6 scenarios behaved as expected
+
+## bash integration/vixen-ci/demo_cron.sh 2>&1  (breaking default)
+== vixen-ci demo (#108 step 3: diff-and-classify) ==
+stored: /Users/senzenn/oss/idl-drift/integration/vixen-ci/sample_stored.json
+fresh:  /Users/senzenn/oss/idl-drift/integration/vixen-ci/sample_fresh_breaking.json
+
+REGENERATION NEEDED: 1 breaking changes
+exit=1
+
+## bash integration/vixen-ci/demo_cron.sh … sample_fresh_ok.json 2>&1
+== vixen-ci demo (#108 step 3: diff-and-classify) ==
+stored: integration/vixen-ci/sample_stored.json
+fresh:  integration/vixen-ci/sample_fresh_ok.json
+
+PARSERS OK
+exit=0

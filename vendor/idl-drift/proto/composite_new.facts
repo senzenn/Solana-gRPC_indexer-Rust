@@ -1,0 +1,6 @@
+IX|trade|disc=5,5,5,5,5,5,5,5
+IXACCT|trade#0|name=user;writable=0;signer=1
+IXACCTGROUP|trade#1|name=market
+IXACCT|trade#1.0|name=bids;writable=1;signer=0
+IXACCT|trade#1.1|name=asks;writable=1;signer=0
+IXACCT|trade#1.2|name=eventQueue;writable=1;signer=0

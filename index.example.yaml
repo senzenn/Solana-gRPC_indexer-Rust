@@ -1,0 +1,39 @@
+# Copy to index.yaml and set your geyser credentials.
+# Env vars override: YELLOWSTONE_ENDPOINT, YELLOWSTONE_AUTH_TOKEN, DATABASE_URL, SOLANA_RPC_URL
+
+geyser:
+  endpoint: ""
+  auth_token: ""
+  # Include failed transactions in the geyser subscription (default: false)
+  track_failed: false
+  # Subscribe to SPL Token / Token-2022 programs and parse transfers (default: false)
+  track_tokens: false
+  # Extra account pubkeys to include in the geyser transaction filter
+  accounts_include: []
+
+store:
+  url: "sqlite:./index.db"
+
+serve:
+  bind: "0.0.0.0:8080"
+
+programs:
+  - "./idls/pump_fun.json"
+
+wallets: []
+
+rpc_url: "https://api.mainnet-beta.solana.com"
+
+sinks:
+  - kind: stdout
+    # Optional filters (all must match when set):
+    # types: ["program_ix", "token_transfer"]
+    # programs: ["pump"]
+    # instructions: ["buy", "sell"]
+
+# Optional gRPC export for downstream consumers
+# grpc:
+#   bind: "0.0.0.0:50051"
+
+# auth:
+#   api_keys: ["dev-key-change-me"]

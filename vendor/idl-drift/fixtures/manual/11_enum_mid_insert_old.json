@@ -1,0 +1,46 @@
+{
+  "address": "Drift1111111111111111111111111111111111111",
+  "metadata": {
+    "name": "demo",
+    "version": "0.1.0",
+    "spec": "0.1.0"
+  },
+  "instructions": [
+    {
+      "name": "setMode",
+      "discriminator": [
+        9
+      ],
+      "accounts": [],
+      "args": [
+        {
+          "name": "m",
+          "type": {
+            "defined": {
+              "name": "Mode"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [],
+  "events": [],
+  "errors": [],
+  "types": [
+    {
+      "name": "Mode",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Fast"
+          },
+          {
+            "name": "Slow"
+          }
+        ]
+      }
+    }
+  ]
+}

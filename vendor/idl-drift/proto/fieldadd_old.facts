@@ -1,0 +1,4 @@
+IX|x|disc=1
+ACCT|Cfg|disc=1,2,3,4,5,6,7,8
+TYPE|Cfg|kind=struct;serialization=borsh
+FIELD|Cfg#0|name=a;type=u64

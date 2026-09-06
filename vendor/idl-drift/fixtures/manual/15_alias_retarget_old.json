@@ -1,0 +1,39 @@
+{
+  "address": "Drift1111111111111111111111111111111111111",
+  "metadata": {
+    "name": "demo",
+    "version": "0.1.0",
+    "spec": "0.1.0"
+  },
+  "instructions": [
+    {
+      "name": "pay",
+      "discriminator": [
+        12
+      ],
+      "accounts": [],
+      "args": [
+        {
+          "name": "amt",
+          "type": {
+            "defined": {
+              "name": "Amount"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [],
+  "events": [],
+  "errors": [],
+  "types": [
+    {
+      "name": "Amount",
+      "type": {
+        "kind": "type",
+        "alias": "u64"
+      }
+    }
+  ]
+}

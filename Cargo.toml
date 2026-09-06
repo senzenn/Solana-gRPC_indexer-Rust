@@ -1,11 +1,16 @@
 [package]
 name = "index-cli"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
+default-run = "index"
+
+[[bin]]
+name = "index"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = { version = "1.0.99", features = ["std"] }
-axum = "0.8.4"
+axum = { version = "0.8.4", features = ["ws"] }
 clap = { version = "4.5.46", features = ["derive", "color", "env", "unicode", "wrap_help", "suggestions"] }
 clap_complete = "4.5.46"
 solana-sdk = "3.0.0"
@@ -16,6 +21,7 @@ solana-rpc-client-api = "3.0.0"
 
 # gRPC and serialization
 tonic = "0.14.1"
+tonic-prost = "0.14.1"
 prost = "0.14.1"
 tokio = { version = "1.47.1", features = ["full"] }
 tokio-stream = "0.1.17"
@@ -41,21 +47,17 @@ futures = "0.3.31"
 crossbeam-channel = "0.5.13"
 
 # Environment and configuration
-dotenv = "0.15.0"
 dotenvy = "0.15.7"
 reqwest = { version = "0.12.8", features = ["json", "stream"] }
 uuid = { version = "1.11.0", features = ["v4"] }
 
 # SQLx database client
-sqlx = { version = "0.8.5", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid", "migrate"] }
+sqlx = { version = "0.8.5", features = ["runtime-tokio-rustls", "sqlite", "postgres", "chrono", "uuid", "migrate"] }
 
 # High-performance caching with LRU + TTL
 moka = { version = "0.12.10", features = ["future"] }
 
-# IPFS integration
-ipfs-api-backend-hyper = { version = "0.6.0", features = ["with-builder"] }
-
-# Compression and encryption for IPFS
+# Compression (IPFS CLI commands are simulated; no ipfs-api client)
 flate2 = "1.0"
 sha2 = "0.10"
 base32 = "0.4"
@@ -74,14 +76,15 @@ serde_with = "3.4.0"
 metrics = "0.22.3"
 metrics-exporter-prometheus = "0.13.1"
 
-# Database for persistence (optional)
-sled = "0.34.7"
-
 # Date and time handling
 chrono = { version = "0.4.31", features = ["serde"] }
 
 # YAML support for export
 serde_yaml = "0.9.34"
 
+# Typed indexer pipeline
+ratatui = "0.26"
+idl-drift = { path = "vendor/idl-drift" }
+
 [build-dependencies]
-tonic-build = "0.14.1"
+tonic-prost-build = "0.14.1"

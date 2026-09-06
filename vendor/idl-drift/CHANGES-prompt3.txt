@@ -1,0 +1,87 @@
+# CHANGES — prompt3: event-only Defined type reachability
+
+## Verdict: reachable_types already handled event-only types correctly — NO FIX
+
+### Trace
+(a) Event names are reachability roots:
+```
+for e in &idl.events { reached.insert(e.name.clone()); }
+```
+So Event "Trade" inserts `"Trade"`.
+
+(b) Transitive closure walks struct fields of reached names in `type_map()`:
+```
+let tm = idl.type_map();
+// ...
+if let TypeDefTy::Struct { fields } = &td.ty {
+    collect_defined_refs(&f.ty, ...) → insert Defined names
+}
+```
+`codama_convert::event_as_type_def` (and these in-code fixtures) place a TypeDef
+named after the event into `types[]`. Once `"Trade"` is a root, `tm.get("Trade")`
+yields the payload struct; a field `Defined("TradeDetail")` is inserted on the
+next closure pass. No change to `reachable_types` was required.
+
+`diff_events` only compares event disc/envelope metadata; layout changes ride
+through `diff_types` gated by this reachability set — which is the correct split.
+
+## Tests added
+- `event_only_type_field_change_is_breaking` — Trade → TradeDetail.px U16→U32 → Breaking
+- `truly_dead_type_change_is_cosmetic` — TradeDetail unreferenced → Cosmetic UNREACHED
+
+## Test count
+- **19 passed** in `tests/diff_tests.rs` (17 prior + 2 new)
+
+## cargo test 2>&1
+   Compiling idl-drift v0.1.0 (/Users/senzenn/oss/idl-drift)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.42s
+     Running unittests src/lib.rs (target/debug/deps/idl_drift-1ccc677adeb46c9c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/idl_drift-567c11c052ffe730)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/diff_tests.rs (target/debug/deps/diff_tests-3aa605b12e47b197)
+
+running 19 tests
+test alias_target_change_is_breaking ... ok
+test disambiguation_order_change_is_dangerous ... ok
+test enum_middle_insert_is_breaking ... ok
+test event_envelope_length_8_to_1_is_breaking ... ok
+test enum_append_is_dangerous_not_breaking ... ok
+test default_omission_produces_no_changes ... ok
+test amm_pool_field_width_is_breaking ... ok
+test duplicate_instruction_name_is_flagged ... ok
+test codama_events_are_top_level_with_discriminator ... ok
+test codama_order_engine_self_diff_is_empty ... ok
+test event_only_type_field_change_is_breaking ... ok
+test missing_discriminator_deserializes_and_is_stable ... ok
+test same_disc_different_account_count_is_not_breaking ... ok
+test same_disc_same_account_count_is_breaking ... ok
+test generic_arg_change_is_breaking ... ok
+test truly_dead_type_change_is_cosmetic ... ok
+test serialization_mode_change_is_breaking ... ok
+test unreachable_type_change_is_not_breaking ... ok
+test same_discriminator_two_encodings_is_no_change ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests idl_drift
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+## cargo clippy --all-targets -- -W clippy::pedantic 2>&1
+    Checking idl-drift v0.1.0 (/Users/senzenn/oss/idl-drift)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.14s
+
+## Clippy
+Warning-clean.

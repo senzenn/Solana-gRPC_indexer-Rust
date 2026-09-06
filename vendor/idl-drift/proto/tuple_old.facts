@@ -1,0 +1,5 @@
+IX|f|disc=1
+IXARG|f#0|name=r;type=Defined:Res
+TYPE|Res|kind=enum;serialization=borsh
+VARIANT|Res#0|name=Ok;payload=u64
+VARIANT|Res#1|name=Err

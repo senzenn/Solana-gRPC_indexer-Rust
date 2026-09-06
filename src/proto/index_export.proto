@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package index;
+
+// Export parsed indexer events to downstream consumers.
+service IndexExport {
+  rpc StreamEvents(StreamEventsRequest) returns (stream IndexEventMsg);
+  rpc GetEvents(GetEventsRequest) returns (GetEventsResponse);
+}
+
+message StreamEventsRequest {
+  string kind = 1;
+  string program = 2;
+}
+
+message GetEventsRequest {
+  uint64 limit = 1;
+  uint64 since_slot = 2;
+  string kind = 3;
+  string program = 4;
+}
+
+message IndexEventMsg {
+  uint64 slot = 1;
+  string kind = 2;
+  string json = 3;
+}
+
+message GetEventsResponse {
+  repeated IndexEventMsg events = 1;
+}

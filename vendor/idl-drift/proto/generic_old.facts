@@ -1,0 +1,4 @@
+IX|f|disc=1
+IXARG|f#0|name=w;type=Defined:Wrapper<u64>
+TYPE|Wrapper|kind=struct;serialization=borsh
+FIELD|Wrapper#0|name=inner;type=Generic:T
