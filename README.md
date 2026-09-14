@@ -24,6 +24,7 @@ Full setup (IDL registration, Docker, validation): **[docs/quickstart.md](docs/q
 | [Quickstart](docs/quickstart.md) | Clone → `.env` → `index.yaml` → run |
 | [Config reference](docs/config-reference.md) | Every `index.yaml` field + env overrides |
 | [Operations runbook](docs/operations-runbook.md) | Cursor, gaps, backfill, IDL drift, troubleshooting |
+| [Product gaps](docs/feature-gaps.md) | Feature roadmap vs shipstern (decode, reorg, sinks) |
 
 ## Primary commands
 

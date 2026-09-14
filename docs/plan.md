@@ -35,3 +35,11 @@ This document outlines the complete plan to transform the Solana-gRPC_indexer-Ru
 *   [x] Config reference (`docs/config-reference.md`) — every `index.yaml` field + env overrides
 *   [x] Operations runbook (`docs/operations-runbook.md`) — cursor, gaps, backfill, IDL drift, troubleshooting
 *   [x] README links to `docs/` and removes sibling `idl-drift` clone requirement
+
+## Phase 7: Product gaps (open)
+
+Phases 1–6 made the pipeline config-driven. Remaining work is features, not hygiene.
+
+See [feature-gaps.md](./feature-gaps.md). Priority: path-based identity + finalized/reorg, then event/CPI/account decode, then sinks.
+
+Mapped against local shipstern (`~/oss/vixen/shipstern`). Steal parsers, CPI trees, handlers, Kafka. Do not vendor the framework.
