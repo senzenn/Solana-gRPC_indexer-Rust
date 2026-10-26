@@ -1,13 +1,13 @@
 use anyhow::Result;
 use clap::{
-    builder::styling::{AnsiColor, Effects, Styles},
     CommandFactory, Parser, Subcommand,
+    builder::styling::{AnsiColor, Effects, Styles},
 };
-use clap_complete::{generate, Generator, Shell};
+use clap_complete::{Generator, Shell, generate};
 use dotenvy::dotenv;
 use std::io;
 use tracing::info;
-use tracing_subscriber::{fmt::format::FmtSpan, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 
 mod pipeline;
 
@@ -56,7 +56,12 @@ enum Commands {
         #[arg(short, long, env = "YELLOWSTONE_ENDPOINT", hide_env_values = true)]
         endpoint: Option<String>,
         /// x-token for the geyser endpoint
-        #[arg(long, env = "YELLOWSTONE_AUTH_TOKEN", default_value = "", hide_env_values = true)]
+        #[arg(
+            long,
+            env = "YELLOWSTONE_AUTH_TOKEN",
+            default_value = "",
+            hide_env_values = true
+        )]
         auth_token: String,
         // No default_value on these: a default would hide which value the user set,
         // so an explicit default could not override YAML. The help text names the default.
@@ -98,7 +103,12 @@ enum Commands {
         config: Option<std::path::PathBuf>,
         #[arg(short, long, env = "YELLOWSTONE_ENDPOINT", hide_env_values = true)]
         endpoint: Option<String>,
-        #[arg(long, env = "YELLOWSTONE_AUTH_TOKEN", default_value = "", hide_env_values = true)]
+        #[arg(
+            long,
+            env = "YELLOWSTONE_AUTH_TOKEN",
+            default_value = "",
+            hide_env_values = true
+        )]
         auth_token: String,
     },
 
@@ -260,9 +270,7 @@ fn resolve_run_args(
         .unwrap_or_else(|| DEFAULT_BIND.to_string());
 
     let wallets = if wallets.is_empty() {
-        cfg.as_ref()
-            .map(|c| c.wallets.clone())
-            .unwrap_or_default()
+        cfg.as_ref().map(|c| c.wallets.clone()).unwrap_or_default()
     } else {
         wallets
     };
@@ -314,10 +322,7 @@ fn resolve_run_args(
         .as_ref()
         .map(|c| c.geyser.accounts_include.clone())
         .unwrap_or_default();
-    let replay = cfg
-        .as_ref()
-        .map(|c| c.geyser.replay)
-        .unwrap_or_default();
+    let replay = cfg.as_ref().map(|c| c.geyser.replay).unwrap_or_default();
     let ping_secs = cfg.as_ref().map(|c| c.geyser.ping_secs).unwrap_or(10);
     let compression = cfg
         .as_ref()
@@ -363,7 +368,12 @@ fn log_filter(verbose: bool) -> &'static str {
 }
 
 fn print_completions<G: Generator>(generator: G, cmd: &mut clap::Command) {
-    generate(generator, cmd, cmd.get_name().to_string(), &mut io::stdout());
+    generate(
+        generator,
+        cmd,
+        cmd.get_name().to_string(),
+        &mut io::stdout(),
+    );
 }
 
 #[tokio::main]
@@ -493,7 +503,11 @@ async fn run_cli() -> Result<()> {
             let bind: std::net::SocketAddr = bind
                 .parse()
                 .map_err(|e| anyhow::anyhow!("invalid --bind {bind}: {e}"))?;
-            let db = if db.trim().is_empty() { DEFAULT_DB.to_string() } else { db };
+            let db = if db.trim().is_empty() {
+                DEFAULT_DB.to_string()
+            } else {
+                db
+            };
             let api_keys = match pipeline::config_file::env_var("INDEX_API_KEYS") {
                 Some(raw) => pipeline::config_file::parse_api_keys(&raw)?.unwrap_or_default(),
                 None => Vec::new(),
@@ -501,9 +515,11 @@ async fn run_cli() -> Result<()> {
             pipeline::demo::run_demo(db, bind, api_keys).await
         }
         Commands::Parser { action } => match action {
-            ParserCmd::New { idl, idl_dir, force } => {
-                pipeline::parser_cmd::add_idl(&idl_dir, &idl, force)
-            }
+            ParserCmd::New {
+                idl,
+                idl_dir,
+                force,
+            } => pipeline::parser_cmd::add_idl(&idl_dir, &idl, force),
             ParserCmd::List { idl_dir } => pipeline::parser_cmd::list_idls(&idl_dir),
             ParserCmd::Diff { old, new } => pipeline::parser_cmd::diff_idls(&old, &new),
             ParserCmd::Fetch {
@@ -572,7 +588,9 @@ sinks: []
         cli.endpoint = Some(String::new());
         cli.db = Some(String::new());
         cli.bind = Some(String::new());
-        let env = |key: &str| matches!(key, "YELLOWSTONE_ENDPOINT" | "YELLOWSTONE_AUTH_TOKEN").then(String::new);
+        let env = |key: &str| {
+            matches!(key, "YELLOWSTONE_ENDPOINT" | "YELLOWSTONE_AUTH_TOKEN").then(String::new)
+        };
         let resolved = resolve_run_args(cli, env).expect("resolve");
         let _ = std::fs::remove_file(&path);
         assert_eq!(resolved.endpoint, "https://yaml.example");
@@ -629,7 +647,11 @@ sinks: []
     fn help_names_run_defaults() {
         let mut cmd = Cli::command();
         let run = cmd.find_subcommand_mut("run").expect("run");
-        for (id, default) in [("bind", DEFAULT_BIND), ("db", DEFAULT_DB), ("idl_dir", DEFAULT_IDL_DIR)] {
+        for (id, default) in [
+            ("bind", DEFAULT_BIND),
+            ("db", DEFAULT_DB),
+            ("idl_dir", DEFAULT_IDL_DIR),
+        ] {
             let arg = run.get_arguments().find(|a| a.get_id() == id).expect("arg");
             let help = arg.get_help().map(|h| h.to_string()).unwrap_or_default();
             assert!(help.contains(default), "{id} help lacks {default}");
@@ -662,7 +684,11 @@ sinks: []
             let sub = cmd.find_subcommand_mut(sub).expect("subcommand");
             for arg in sub.get_arguments() {
                 if arg.get_env().is_some() {
-                    assert!(arg.is_hide_env_values_set(), "{} shows its env value", arg.get_id());
+                    assert!(
+                        arg.is_hide_env_values_set(),
+                        "{} shows its env value",
+                        arg.get_id()
+                    );
                 }
             }
         }
@@ -671,7 +697,11 @@ sinks: []
             let sub = parser.find_subcommand_mut(sub).expect("subcommand");
             for arg in sub.get_arguments() {
                 if arg.get_env().is_some() {
-                    assert!(arg.is_hide_env_values_set(), "{} shows its env value", arg.get_id());
+                    assert!(
+                        arg.is_hide_env_values_set(),
+                        "{} shows its env value",
+                        arg.get_id()
+                    );
                 }
             }
         }

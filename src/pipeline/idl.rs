@@ -6,9 +6,9 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use idl_drift::model::{AccountItem, Idl, Instruction};
-use idl_drift::{coverage, diff, Severity};
+use idl_drift::{Severity, coverage, diff};
 use solana_sdk::pubkey::Pubkey;
 use tracing::warn;
 
@@ -50,10 +50,9 @@ impl IdlRouter {
     }
 
     pub fn load_file(&mut self, path: &Path) -> Result<()> {
-        let src = fs::read_to_string(path)
-            .with_context(|| format!("read IDL {}", path.display()))?;
-        let idl = Idl::from_json(&src)
-            .with_context(|| format!("parse IDL {}", path.display()))?;
+        let src =
+            fs::read_to_string(path).with_context(|| format!("read IDL {}", path.display()))?;
+        let idl = Idl::from_json(&src).with_context(|| format!("parse IDL {}", path.display()))?;
         self.load_idl(&idl)
             .with_context(|| format!("load IDL {}", path.display()))
     }
@@ -192,9 +191,7 @@ pub fn find_idl_file(idl_dir: &Path, program_id: &str) -> Result<Option<PathBuf>
     Ok(None)
 }
 
-fn flatten_account_items(
-    items: &[AccountItem],
-) -> Vec<(&str, bool)> {
+fn flatten_account_items(items: &[AccountItem]) -> Vec<(&str, bool)> {
     let mut out = Vec::new();
     for item in items {
         match item {
@@ -230,11 +227,7 @@ fn named_accounts_from_ix(
         })
         .collect();
 
-    if named.is_empty() {
-        None
-    } else {
-        Some(named)
-    }
+    if named.is_empty() { None } else { Some(named) }
 }
 
 /// Inspect + optional baseline diff before writing a new IDL into the registry.

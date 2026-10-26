@@ -1,11 +1,11 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use idl_drift::{diff, Severity};
+use idl_drift::{Severity, diff};
 use tokio::time::sleep;
 use tracing::{info, warn};
 
-use super::idl::{find_idl_file, install_idl, IdlRouter};
+use super::idl::{IdlRouter, find_idl_file, install_idl};
 use super::idl_fetch::fetch_idl_json;
 
 pub struct WatchConfig {
@@ -75,13 +75,14 @@ async fn check_one(cfg: &WatchConfig, program_id: &str) -> Result<()> {
 
     warn!(
         program_id,
-        breaking,
-        dangerous,
-        "on-chain IDL drift detected"
+        breaking, dangerous, "on-chain IDL drift detected"
     );
 
     if breaking > 0 && !cfg.force_on_breaking {
-        warn!(program_id, "breaking drift — not updating (pass --force to overwrite)");
+        warn!(
+            program_id,
+            "breaking drift — not updating (pass --force to overwrite)"
+        );
         return Ok(());
     }
 

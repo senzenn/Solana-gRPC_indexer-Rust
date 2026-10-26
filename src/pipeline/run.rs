@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use anyhow::{bail, Context, Result};
-use tokio::sync::{broadcast, mpsc, RwLock};
+use anyhow::{Context, Result, bail};
+use tokio::sync::{RwLock, broadcast, mpsc};
 use tokio::task::{JoinError, JoinSet};
 use tracing::{info, warn};
 
@@ -14,11 +14,11 @@ use super::compiled;
 use super::config_file::SinkConfig;
 use super::event::IndexEvent;
 use super::idl::IdlRouter;
-use super::ingest::{decode_instructions, run_ingest, IngestConfig, IngestMsg, SlotCommitment};
-use super::serve::{serve, AppState, LiveStats};
-use super::sink::{build_sinks, SinkFanout};
+use super::ingest::{IngestConfig, IngestMsg, SlotCommitment, decode_instructions, run_ingest};
 use super::metrics as prom;
-use super::store::{detect_gap, EventStore};
+use super::serve::{AppState, LiveStats, serve};
+use super::sink::{SinkFanout, build_sinks};
+use super::store::{EventStore, detect_gap};
 
 /// Sinks are best-effort: when this queue is full, events are dropped, not waited on.
 const SINK_QUEUE: usize = 1024;
@@ -115,7 +115,12 @@ pub async fn run(args: RunArgs) -> Result<()> {
         compression: args.compression,
     };
     let ingest_slots = last_slot_atomic.clone();
-    tasks.spawn(async move { ("ingest", run_ingest(ingest_cfg, ingest_tx, ingest_slots).await) });
+    tasks.spawn(async move {
+        (
+            "ingest",
+            run_ingest(ingest_cfg, ingest_tx, ingest_slots).await,
+        )
+    });
 
     // Without a backfill worker nothing reads gaps, so do not queue them.
     let gap_tx = if let Some(rpc_url) = args.rpc_url.clone() {
@@ -152,7 +157,10 @@ pub async fn run(args: RunArgs) -> Result<()> {
         };
         let keys = api_state.clone();
         tasks.spawn(async move {
-            ("grpc export", super::grpc_export::serve(grpc_bind, export, keys).await)
+            (
+                "grpc export",
+                super::grpc_export::serve(grpc_bind, export, keys).await,
+            )
         });
         info!(%grpc_bind, "gRPC export listening");
     }
@@ -264,8 +272,15 @@ impl Pipeline {
                         let parent = parent.or_else(|| self.slot_parents.get(&slot).copied());
                         let gap = jump_gap.or_else(|| confirmed_gap(self.last_slot, slot, parent));
                         if let Some((from, to)) = gap {
-                            emit_gap(store, &self.bus, self.gap_tx.as_ref(), &self.stats, from, to)
-                                .await?;
+                            emit_gap(
+                                store,
+                                &self.bus,
+                                self.gap_tx.as_ref(),
+                                &self.stats,
+                                from,
+                                to,
+                            )
+                            .await?;
                         }
                         let s = slot.max(self.last_slot.unwrap_or(0));
                         self.last_slot = Some(s);
@@ -351,7 +366,11 @@ impl Pipeline {
         };
         let far = |slot: u64| slot.saturating_sub(last) > MAX_SLOT_JUMP;
         match msg {
-            IngestMsg::Slot { slot, parent, status } => {
+            IngestMsg::Slot {
+                slot,
+                parent,
+                status,
+            } => {
                 let confirmed = *status == SlotCommitment::Confirmed;
                 if !far(*slot) {
                     if confirmed {
@@ -375,7 +394,11 @@ impl Pipeline {
                 }
                 self.jump_streak = 0;
                 self.slot_parents.append(&mut self.far_parents);
-                warn!(slot, last_slot = last, "far confirmed slots kept coming; accepting the jump");
+                warn!(
+                    slot,
+                    last_slot = last,
+                    "far confirmed slots kept coming; accepting the jump"
+                );
                 // Events of this slot and the skipped ones were dropped, so the gap includes `slot`.
                 Jump::Accept {
                     from: last + 1,
@@ -396,7 +419,10 @@ enum Jump {
     /// Drop the update.
     Skip(u64),
     /// Far confirmed slots kept coming: take the slot and record this gap.
-    Accept { from: u64, to: u64 },
+    Accept {
+        from: u64,
+        to: u64,
+    },
 }
 
 /// Missing range before confirmed `slot`. With a known parent, the slots between
@@ -465,7 +491,7 @@ pub(super) fn warn_if_exposed(service: &str, bind: SocketAddr, auth: &ApiKeyStat
 pub(super) async fn shutdown_signal() -> Result<()> {
     #[cfg(unix)]
     {
-        use tokio::signal::unix::{signal, SignalKind};
+        use tokio::signal::unix::{SignalKind, signal};
         let mut term = signal(SignalKind::terminate()).context("install SIGTERM handler")?;
         tokio::select! {
             res = tokio::signal::ctrl_c() => res.context("wait for Ctrl-C")?,
@@ -558,9 +584,7 @@ mod tests {
     #[tokio::test]
     async fn emit_gap_does_not_block_when_gap_queue_is_full_or_absent() {
         let db = TempDb::new();
-        let store = EventStore::open(&db.url)
-            .await
-            .expect("open store");
+        let store = EventStore::open(&db.url).await.expect("open store");
         let (bus, _) = broadcast::channel(16);
         let stats = Arc::new(RwLock::new(LiveStats::default()));
         // Nothing reads this queue, as when the backfill worker is slow.
@@ -679,7 +703,13 @@ mod tests {
             .await
             .expect("processed");
         assert!(p.slot_parents.is_empty());
-        assert!(p.store.slots_between(s, far + 1).await.expect("slots").is_empty());
+        assert!(
+            p.store
+                .slots_between(s, far + 1)
+                .await
+                .expect("slots")
+                .is_empty()
+        );
 
         // A plausible slot resets the run; a long run of far slots is accepted.
         p.handle(slot_msg(s + 1, Some(s), SlotCommitment::Confirmed))
@@ -708,9 +738,13 @@ mod tests {
         let last_far = far + u64::from(JUMP_ACCEPT_STREAK) - 1;
         let mut p = pipeline(&db.url, Some(s)).await;
         // Processed comes before confirmed. last_far + 1 was skipped by its leader.
-        p.handle(slot_msg(last_far + 2, Some(last_far), SlotCommitment::Processed))
-            .await
-            .expect("processed");
+        p.handle(slot_msg(
+            last_far + 2,
+            Some(last_far),
+            SlotCommitment::Processed,
+        ))
+        .await
+        .expect("processed");
         for slot in far..=last_far {
             p.handle(slot_msg(slot, None, SlotCommitment::Confirmed))
                 .await

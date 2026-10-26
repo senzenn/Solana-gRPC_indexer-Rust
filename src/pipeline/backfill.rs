@@ -24,11 +24,11 @@ use tokio::time::MissedTickBehavior;
 use tracing::{info, warn};
 
 use super::event::{
-    failed_tx_policy, resolve_accounts, signature_from_base58, IndexEvent, RawInstruction,
+    IndexEvent, RawInstruction, failed_tx_policy, resolve_accounts, signature_from_base58,
 };
 use super::idl::IdlRouter;
 use super::ingest::decode_instructions;
-use super::ix_path::{assign_inner_paths, IxPath};
+use super::ix_path::{IxPath, assign_inner_paths};
 use super::store::EventStore;
 
 const BACKFILL_RATE: Duration = Duration::from_millis(200); // 5 req/s
@@ -399,9 +399,13 @@ fn extract_instructions(slot: u64, tx: &EncodedTransactionWithStatusMeta) -> Vec
     match &ui_tx.message {
         UiMessage::Raw(raw) => {
             for (outer_index, ix) in raw.instructions.iter().enumerate() {
-                if let Some(raw_ix) =
-                    compiled_ui_to_raw(slot, &signature, IxPath::root(outer_index as u32), &keys, ix)
-                {
+                if let Some(raw_ix) = compiled_ui_to_raw(
+                    slot,
+                    &signature,
+                    IxPath::root(outer_index as u32),
+                    &keys,
+                    ix,
+                ) {
                     out.push(raw_ix);
                 }
             }
@@ -463,10 +467,11 @@ fn account_keys(message: &UiMessage, meta: Option<&UiTransactionStatusMeta>) -> 
     };
 
     if let Some(meta) = meta
-        && let OptionSerializer::Some(loaded) = &meta.loaded_addresses {
-            keys.extend(loaded.writable.iter().cloned());
-            keys.extend(loaded.readonly.iter().cloned());
-        }
+        && let OptionSerializer::Some(loaded) = &meta.loaded_addresses
+    {
+        keys.extend(loaded.writable.iter().cloned());
+        keys.extend(loaded.readonly.iter().cloned());
+    }
 
     keys
 }

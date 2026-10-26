@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use super::compiled;
-use super::idl::{install_idl, printable, IdlRouter};
+use super::idl::{IdlRouter, install_idl, printable};
 use super::idl_fetch::fetch_idl_json;
 
 pub fn add_idl(idl_dir: &Path, idl_path: &Path, force: bool) -> Result<()> {
@@ -44,7 +44,11 @@ pub fn list_idls(idl_dir: &Path) -> Result<()> {
         println!("{}", printable(id));
     }
     for id in compiled_ids {
-        let note = if ids.contains(&id) { "compiled, overridden by IDL file" } else { "compiled" };
+        let note = if ids.contains(&id) {
+            "compiled, overridden by IDL file"
+        } else {
+            "compiled"
+        };
         println!("{id} ({note})");
     }
     Ok(())
@@ -67,12 +71,7 @@ pub fn diff_idls(old: &PathBuf, new: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-pub async fn fetch_idl(
-    rpc_url: &str,
-    program_id: &str,
-    idl_dir: &Path,
-    force: bool,
-) -> Result<()> {
+pub async fn fetch_idl(rpc_url: &str, program_id: &str, idl_dir: &Path, force: bool) -> Result<()> {
     let json = fetch_idl_json(rpc_url, program_id).await?;
     let (dest, report) = install_idl(idl_dir, &json, force)?;
     println!(

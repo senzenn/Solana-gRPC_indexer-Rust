@@ -135,13 +135,11 @@ mod tests {
 
     #[test]
     fn tx_paths_outers_then_inners() {
-        let got: Vec<String> = tx_instruction_paths(
-            2,
-            &[(0, vec![Some(2)]), (1, vec![Some(2), Some(3)])],
-        )
-        .into_iter()
-        .map(|p| p.to_string())
-        .collect();
+        let got: Vec<String> =
+            tx_instruction_paths(2, &[(0, vec![Some(2)]), (1, vec![Some(2), Some(3)])])
+                .into_iter()
+                .map(|p| p.to_string())
+                .collect();
         assert_eq!(got, vec!["0", "1", "0.0", "1.0", "1.0.0"]);
     }
 

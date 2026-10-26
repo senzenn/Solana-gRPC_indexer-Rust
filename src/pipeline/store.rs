@@ -7,11 +7,11 @@ use chrono::Utc;
 use serde::Serialize;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
-use sqlx::{postgres::PgPool, QueryBuilder, Row, Sqlite, SqlitePool};
+use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool, postgres::PgPool};
 use tokio::sync::{Semaphore, SemaphorePermit};
 
 use super::event::IndexEvent;
-use super::reorg::{orphans_if_chain_complete, SlotCommitment};
+use super::reorg::{SlotCommitment, orphans_if_chain_complete};
 
 pub const MAX_EVENT_LIMIT: i64 = 500;
 /// A large OFFSET makes the database walk that many rows. Deeper pages must use `since_slot`.
@@ -151,9 +151,10 @@ impl EventStore {
             .or_else(|| url.strip_prefix("sqlite:"))
             .and_then(|rest| rest.split('?').next())
             && let Some(parent) = std::path::Path::new(path).parent()
-                && !parent.as_os_str().is_empty() {
-                    std::fs::create_dir_all(parent).ok();
-                }
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent).ok();
+        }
 
         // WAL lets API reads run during ingest writes. The default 5s busy wait made
         // a slow read fail the ingest write.
@@ -176,9 +177,7 @@ impl EventStore {
         let DbBackend::Sqlite(pool) = &self.backend else {
             anyhow::bail!("expected sqlite backend");
         };
-        sqlx::migrate!("./migrations/sqlite")
-            .run(pool)
-            .await?;
+        sqlx::migrate!("./migrations/sqlite").run(pool).await?;
         Ok(())
     }
 
@@ -186,9 +185,7 @@ impl EventStore {
         let DbBackend::Postgres(pool) = &self.backend else {
             anyhow::bail!("expected postgres backend");
         };
-        sqlx::migrate!("./migrations/postgres")
-            .run(pool)
-            .await?;
+        sqlx::migrate!("./migrations/postgres").run(pool).await?;
         Ok(())
     }
 
@@ -369,10 +366,12 @@ impl EventStore {
                 rows_to_events_sqlite(rows)
             }
             DbBackend::Postgres(pool) => {
-                let rows = sqlx::query("SELECT payload::text as payload FROM events ORDER BY id DESC LIMIT $1")
-                    .bind(limit)
-                    .fetch_all(pool)
-                    .await?;
+                let rows = sqlx::query(
+                    "SELECT payload::text as payload FROM events ORDER BY id DESC LIMIT $1",
+                )
+                .bind(limit)
+                .fetch_all(pool)
+                .await?;
                 rows_to_events_postgres(rows)
             }
         }
@@ -398,8 +397,9 @@ impl EventStore {
                 rows_to_events_sqlite(rows)
             }
             DbBackend::Postgres(pool) => {
-                let mut qb =
-                    QueryBuilder::<sqlx::Postgres>::new("SELECT payload::text as payload FROM events WHERE 1=1");
+                let mut qb = QueryBuilder::<sqlx::Postgres>::new(
+                    "SELECT payload::text as payload FROM events WHERE 1=1",
+                );
                 apply_event_filter_pg(&mut qb, &filter);
                 qb.push(" ORDER BY id ASC LIMIT ");
                 qb.push_bind(filter.limit);
@@ -769,13 +769,11 @@ impl EventStore {
                     .await?;
             }
             DbBackend::Postgres(pool) => {
-                sqlx::query(
-                    "UPDATE gaps SET filled = TRUE WHERE from_slot = $1 AND to_slot = $2",
-                )
-                .bind(from_slot)
-                .bind(to_slot)
-                .execute(pool)
-                .await?;
+                sqlx::query("UPDATE gaps SET filled = TRUE WHERE from_slot = $1 AND to_slot = $2")
+                    .bind(from_slot)
+                    .bind(to_slot)
+                    .execute(pool)
+                    .await?;
             }
         }
         Ok(())
@@ -796,7 +794,10 @@ fn slot_bound(slot: u64) -> i64 {
 
 /// Slots that can be in the store. Larger values cannot match a row.
 fn stored_slots(slots: &[u64]) -> Vec<i64> {
-    slots.iter().filter_map(|slot| i64::try_from(*slot).ok()).collect()
+    slots
+        .iter()
+        .filter_map(|slot| i64::try_from(*slot).ok())
+        .collect()
 }
 
 /// Postgres `jsonb` and `text` reject U+0000, so one on-chain string could stop
@@ -976,8 +977,8 @@ pub fn detect_gap(last: Option<u64>, next: u64) -> Option<(u64, u64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pipeline::testutil::TempDb;
     use crate::pipeline::event::{IndexEvent, TOKEN_PROGRAM};
+    use crate::pipeline::testutil::TempDb;
 
     #[test]
     fn gap_detected_when_slots_skipped() {
@@ -1076,8 +1077,14 @@ mod tests {
         let url = db.url.clone();
         let store = EventStore::open(&url).await.unwrap();
 
-        store.write_event(&token_transfer(10, "sig-a")).await.unwrap();
-        store.write_event(&token_transfer(20, "sig-b")).await.unwrap();
+        store
+            .write_event(&token_transfer(10, "sig-a"))
+            .await
+            .unwrap();
+        store
+            .write_event(&token_transfer(20, "sig-b"))
+            .await
+            .unwrap();
         store
             .write_event(&IndexEvent::ProgramIx {
                 slot: 15,
@@ -1156,7 +1163,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(paged.len(), 1);
-
     }
 
     #[tokio::test]
@@ -1187,7 +1193,6 @@ mod tests {
         let all = store.list_gaps(false).await.unwrap();
         assert_eq!(all.len(), 2);
         assert!(all.iter().any(|g| g.from_slot == 10 && g.filled));
-
     }
 
     #[tokio::test]
@@ -1253,7 +1258,6 @@ mod tests {
             .unwrap();
         assert_eq!(since.len(), 1);
         assert_eq!(since[0].signature(), Some("replay-sig-2"));
-
     }
 
     #[tokio::test]
@@ -1271,12 +1275,13 @@ mod tests {
         assert_eq!(gaps[0].from_slot, 11);
         assert_eq!(gaps[0].to_slot, 13);
 
-        store.write_event(&IndexEvent::Gap {
-            from_slot: 11,
-            to_slot: 13,
-        })
-        .await
-        .unwrap();
+        store
+            .write_event(&IndexEvent::Gap {
+                from_slot: 11,
+                to_slot: 13,
+            })
+            .await
+            .unwrap();
 
         let gap_events = store
             .query_events(EventFilter {
@@ -1287,7 +1292,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(gap_events.len(), 1);
-
     }
 
     #[tokio::test]
@@ -1310,7 +1314,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(all.len(), 2);
-
     }
 
     #[tokio::test]
@@ -1337,13 +1340,14 @@ mod tests {
             .unwrap();
         assert_eq!(all.len(), 1);
         match &all[0] {
-            IndexEvent::TokenTransfer { amount, ix_path, .. } => {
+            IndexEvent::TokenTransfer {
+                amount, ix_path, ..
+            } => {
                 assert_eq!(*amount, 99);
                 assert_eq!(ix_path, "0.1");
             }
             other => panic!("unexpected {other:?}"),
         }
-
     }
 
     #[tokio::test]
@@ -1391,7 +1395,6 @@ mod tests {
         let cursor = store.load_cursor().await.unwrap().unwrap();
         assert_eq!(cursor.finalized_slot, 103);
         assert_eq!(cursor.slot, 103);
-
     }
 
     #[tokio::test]
@@ -1413,7 +1416,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(remaining.len(), 1);
-
     }
 
     async fn memory_store() -> EventStore {
@@ -1508,9 +1510,7 @@ mod tests {
     #[tokio::test]
     async fn sqlite_store_uses_wal() {
         let db = TempDb::new();
-        let store = EventStore::open(&db.url)
-            .await
-            .unwrap();
+        let store = EventStore::open(&db.url).await.unwrap();
         let DbBackend::Sqlite(pool) = &store.backend else {
             panic!("expected sqlite");
         };
@@ -1550,7 +1550,12 @@ mod tests {
         assert_eq!(store.query_events(until).await.unwrap().len(), 1);
 
         assert!(store.commit_cursor(u64::MAX).await.is_err());
-        assert!(store.write_event(&token_transfer(u64::MAX, "b")).await.is_err());
+        assert!(
+            store
+                .write_event(&token_transfer(u64::MAX, "b"))
+                .await
+                .is_err()
+        );
         assert!(store.load_cursor().await.unwrap().is_none());
     }
 
@@ -1617,10 +1622,22 @@ mod tests {
         let migrations = dir.join("migrations");
         std::fs::create_dir_all(&migrations).unwrap();
         for (name, sql) in [
-            ("001_events_pipeline.sql", include_str!("../../migrations/sqlite/001_events_pipeline.sql")),
-            ("002_ix_path_and_finalized.sql", include_str!("../../migrations/sqlite/002_ix_path_and_finalized.sql")),
-            ("003_events_filter_indexes.sql", include_str!("../../migrations/sqlite/003_events_filter_indexes.sql")),
-            ("004_gaps_open_index.sql", include_str!("../../migrations/sqlite/004_gaps_open_index.sql")),
+            (
+                "001_events_pipeline.sql",
+                include_str!("../../migrations/sqlite/001_events_pipeline.sql"),
+            ),
+            (
+                "002_ix_path_and_finalized.sql",
+                include_str!("../../migrations/sqlite/002_ix_path_and_finalized.sql"),
+            ),
+            (
+                "003_events_filter_indexes.sql",
+                include_str!("../../migrations/sqlite/003_events_filter_indexes.sql"),
+            ),
+            (
+                "004_gaps_open_index.sql",
+                include_str!("../../migrations/sqlite/004_gaps_open_index.sql"),
+            ),
         ] {
             std::fs::write(migrations.join(name), sql).unwrap();
         }

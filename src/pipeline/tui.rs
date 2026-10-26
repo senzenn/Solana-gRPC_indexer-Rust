@@ -1,15 +1,17 @@
-use std::io::{stdout, Stdout};
+use std::io::{Stdout, stdout};
 use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
 use futures::StreamExt;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
-use tokio::sync::{broadcast, RwLock};
 use std::sync::Arc;
+use tokio::sync::{RwLock, broadcast};
 
 use super::event::IndexEvent;
 use super::serve::LiveStats;
@@ -96,7 +98,11 @@ fn format_event(event: &IndexEvent) -> String {
             source,
             destination,
             ..
-        } => format!("{slot} transfer {amount} {} -> {}", short(source), short(destination)),
+        } => format!(
+            "{slot} transfer {amount} {} -> {}",
+            short(source),
+            short(destination)
+        ),
         IndexEvent::ProgramIx {
             slot,
             program_name,
@@ -130,7 +136,12 @@ fn draw(f: &mut Frame, stats: &LiveStats, lines: &[String]) {
 
     let header = Paragraph::new(format!(
         "slot {}   finalized {}   events {}   token {}   program {}   gaps {}   q to quit",
-        stats.slot, stats.finalized_slot, stats.events_total, stats.token_transfers, stats.program_ix, stats.open_gaps
+        stats.slot,
+        stats.finalized_slot,
+        stats.events_total,
+        stats.token_transfers,
+        stats.program_ix,
+        stats.open_gaps
     ))
     .block(Block::default().borders(Borders::ALL).title("index"));
     f.render_widget(header, chunks[0]);

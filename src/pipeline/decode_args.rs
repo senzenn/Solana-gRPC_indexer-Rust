@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use idl_drift::model::{ArrayLen, EnumFields, Idl, Instruction, Type, TypeDef, TypeDefTy};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Type nesting limit. A self-referential IDL type must fail here, not
 /// overflow the stack.
@@ -264,7 +264,9 @@ fn read_u64(data: &[u8], cursor: &mut usize) -> Result<u64> {
 }
 
 fn read_u128(data: &[u8], cursor: &mut usize) -> Result<u128> {
-    Ok(u128::from_le_bytes(read_bytes(data, cursor, 16)?.try_into()?))
+    Ok(u128::from_le_bytes(
+        read_bytes(data, cursor, 16)?.try_into()?,
+    ))
 }
 
 fn read_i8(data: &[u8], cursor: &mut usize) -> Result<i8> {
@@ -284,7 +286,9 @@ fn read_i64(data: &[u8], cursor: &mut usize) -> Result<i64> {
 }
 
 fn read_i128(data: &[u8], cursor: &mut usize) -> Result<i128> {
-    Ok(i128::from_le_bytes(read_bytes(data, cursor, 16)?.try_into()?))
+    Ok(i128::from_le_bytes(
+        read_bytes(data, cursor, 16)?.try_into()?,
+    ))
 }
 
 fn read_f32(data: &[u8], cursor: &mut usize) -> Result<f32> {

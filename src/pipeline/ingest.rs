@@ -1,25 +1,26 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use futures::{sink::SinkExt, StreamExt};
+use futures::{StreamExt, sink::SinkExt};
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 use yellowstone_grpc_proto::prelude::{
-    subscribe_update::UpdateOneof, CommitmentLevel, SubscribeRequest, SubscribeRequestFilterSlots,
+    CommitmentLevel, SubscribeRequest, SubscribeRequestFilterSlots,
     SubscribeRequestFilterTransactions, SubscribeRequestPing, SubscribeUpdate,
+    subscribe_update::UpdateOneof,
 };
 
 use super::config_file::{CompressionKind, ReplayMode};
 use super::event::RawInstruction;
 use super::event::{
-    failed_tx_policy, resolve_accounts, signature_from_bytes, TOKEN_2022_PROGRAM, TOKEN_PROGRAM,
+    TOKEN_2022_PROGRAM, TOKEN_PROGRAM, failed_tx_policy, resolve_accounts, signature_from_bytes,
 };
 use super::geyser;
 use super::idl::IdlRouter;
-use super::ix_path::{assign_inner_paths, IxPath};
+use super::ix_path::{IxPath, assign_inner_paths};
 pub use super::reorg::SlotCommitment;
 
 pub enum IngestMsg {
@@ -180,9 +181,7 @@ async fn stream_once(
     let (mut subscribe_tx, mut stream) =
         match client.subscribe_with_request(Some(request.clone())).await {
             Ok(pair) => pair,
-            Err(err)
-                if from_slot.is_some() && geyser::is_replay_error(&err.to_string()) =>
-            {
+            Err(err) if from_slot.is_some() && geyser::is_replay_error(&err.to_string()) => {
                 warn!(error = %err, "from_slot rejected; resubscribing from tip");
                 from_slot = None;
                 request = build_request(cfg, None);
@@ -440,9 +439,7 @@ pub fn decode_instructions(
 ) -> Vec<super::event::IndexEvent> {
     let mut events = Vec::new();
     for ix in ixs {
-        if track_tokens
-            && let Some(event) = super::token::parse_token_ix(ix)
-        {
+        if track_tokens && let Some(event) = super::token::parse_token_ix(ix) {
             events.push(event);
             continue;
         }
@@ -488,9 +485,7 @@ mod tests {
         assert!(filter.account_include.contains(&"wallet1".into()));
         assert!(filter.account_include.contains(&"acct1".into()));
         assert!(filter.account_include.contains(&"prog1".into()));
-        assert!(!filter
-            .account_include
-            .contains(&TOKEN_PROGRAM.to_string()));
+        assert!(!filter.account_include.contains(&TOKEN_PROGRAM.to_string()));
     }
 
     #[test]
@@ -502,12 +497,12 @@ mod tests {
         let req = build_request(&cfg, None);
         let filter = req.transactions.get("ix").unwrap();
         assert_eq!(filter.failed, Some(false));
-        assert!(filter
-            .account_include
-            .contains(&TOKEN_PROGRAM.to_string()));
-        assert!(filter
-            .account_include
-            .contains(&TOKEN_2022_PROGRAM.to_string()));
+        assert!(filter.account_include.contains(&TOKEN_PROGRAM.to_string()));
+        assert!(
+            filter
+                .account_include
+                .contains(&TOKEN_2022_PROGRAM.to_string())
+        );
     }
 
     #[test]

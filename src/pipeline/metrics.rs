@@ -20,10 +20,7 @@ pub fn init() -> &'static PrometheusHandle {
             "indexer_slot_finalized",
             "Latest finalized slot committed by the indexer"
         );
-        describe_gauge!(
-            "indexer_lag_slots",
-            "Confirmed slot minus finalized slot"
-        );
+        describe_gauge!("indexer_lag_slots", "Confirmed slot minus finalized slot");
         describe_counter!(
             "indexer_orphan_slots_total",
             "Slots dropped after fork rollback or dead-slot updates"

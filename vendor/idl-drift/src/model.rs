@@ -586,7 +586,10 @@ mod legacy_anchor_tests {
             ]
         }"#;
         let idl = Idl::from_json(src).unwrap();
-        assert_eq!(idl.instructions[0].discriminator, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(
+            idl.instructions[0].discriminator,
+            vec![1, 2, 3, 4, 5, 6, 7, 8]
+        );
     }
 
     #[test]

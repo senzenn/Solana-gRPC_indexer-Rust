@@ -4,26 +4,26 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
+use axum::Router;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::{Extension, Json};
-use axum::Router;
 use hyper::server::conn::http1;
 use hyper_util::rt::{TokioIo, TokioTimer};
 use hyper_util::service::TowerToHyperService;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
-use tokio::sync::{broadcast, RwLock, Semaphore};
+use tokio::sync::{RwLock, Semaphore, broadcast};
 use tracing::{error, info, warn};
 
-use super::auth::{require_api_key, ApiKeyState, WS_KEY_PROTOCOL};
+use super::auth::{ApiKeyState, WS_KEY_PROTOCOL, require_api_key};
 use super::event::IndexEvent;
 use super::metrics as prom;
-use super::store::{EventFilter, EventStore, StoreBusy, MAX_EVENT_OFFSET};
+use super::store::{EventFilter, EventStore, MAX_EVENT_OFFSET, StoreBusy};
 
 const MAX_HTTP_CONNECTIONS: usize = 512;
 /// Also limits a silent new connection and an idle keep-alive connection.
@@ -226,7 +226,10 @@ fn events_filter(params: EventsQuery) -> Result<EventFilter, String> {
         return Err(format!("offset must not exceed {MAX_EVENT_OFFSET}"));
     }
     if !slot_fits_i64(params.since_slot) || !slot_fits_i64(params.until_slot) {
-        return Err(format!("since_slot and until_slot must not exceed {}", i64::MAX));
+        return Err(format!(
+            "since_slot and until_slot must not exceed {}",
+            i64::MAX
+        ));
     }
     Ok(EventFilter {
         limit: params.limit.unwrap_or(100),
@@ -243,7 +246,10 @@ async fn events(State(state): State<AppState>, Query(params): Query<EventsQuery>
     let filter = match events_filter(params) {
         Ok(filter) => filter,
         Err(msg) => {
-            return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": msg })))
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": msg })),
+            )
                 .into_response();
         }
     };
@@ -321,10 +327,13 @@ fn same_origin(headers: &HeaderMap) -> bool {
         .get("x-forwarded-host")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.split(',').next());
-    [headers.get(header::HOST).and_then(|v| v.to_str().ok()), forwarded]
-        .into_iter()
-        .flatten()
-        .any(|host| host.trim().eq_ignore_ascii_case(origin_host))
+    [
+        headers.get(header::HOST).and_then(|v| v.to_str().ok()),
+        forwarded,
+    ]
+    .into_iter()
+    .flatten()
+    .any(|host| host.trim().eq_ignore_ascii_case(origin_host))
 }
 
 fn lagged_notice(skipped: u64) -> String {
@@ -487,17 +496,29 @@ mod tests {
         headers.insert(header::HOST, HeaderValue::from_static("127.0.0.1:8080"));
         assert!(same_origin(&headers));
 
-        headers.insert(header::ORIGIN, HeaderValue::from_static("http://127.0.0.1:8080"));
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("http://127.0.0.1:8080"),
+        );
         assert!(same_origin(&headers));
 
-        headers.insert(header::ORIGIN, HeaderValue::from_static("https://evil.example"));
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("https://evil.example"),
+        );
         assert!(!same_origin(&headers));
 
         headers.insert(header::ORIGIN, HeaderValue::from_static("null"));
         assert!(!same_origin(&headers));
 
-        headers.insert(header::ORIGIN, HeaderValue::from_static("https://index.example"));
-        headers.insert("x-forwarded-host", HeaderValue::from_static("index.example"));
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("https://index.example"),
+        );
+        headers.insert(
+            "x-forwarded-host",
+            HeaderValue::from_static("index.example"),
+        );
         assert!(same_origin(&headers));
     }
 
@@ -530,7 +551,7 @@ mod tests {
     #[tokio::test]
     async fn ws_rejects_cross_site_origin() {
         use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-        use tokio_tungstenite::tungstenite::{http, Error};
+        use tokio_tungstenite::tungstenite::{Error, http};
 
         let (store, _db) = temp_store().await;
         let (bus, _) = broadcast::channel(4);
@@ -543,7 +564,10 @@ mod tests {
         );
         match tokio_tungstenite::connect_async(req).await {
             Err(Error::Http(resp)) => assert_eq!(resp.status().as_u16(), 403),
-            other => panic!("expected 403, got {:?}", other.map(|(_, resp)| resp.status())),
+            other => panic!(
+                "expected 403, got {:?}",
+                other.map(|(_, resp)| resp.status())
+            ),
         }
     }
 
@@ -556,7 +580,9 @@ mod tests {
         let (bus, _) = broadcast::channel(4);
         let addr = spawn_app(store, bus, vec!["s3cret".into()]).await;
 
-        let mut req = format!("ws://{addr}/v1/stream").into_client_request().unwrap();
+        let mut req = format!("ws://{addr}/v1/stream")
+            .into_client_request()
+            .unwrap();
         req.headers_mut().insert(
             "sec-websocket-protocol",
             http::HeaderValue::from_static("index-key, s3cret"),
@@ -585,7 +611,10 @@ mod tests {
 
         match tokio_tungstenite::connect_async(format!("ws://{addr}/stream?api_key=s3cret")).await {
             Err(Error::Http(resp)) => assert_eq!(resp.status().as_u16(), 401),
-            other => panic!("expected 401, got {:?}", other.map(|(_, resp)| resp.status())),
+            other => panic!(
+                "expected 401, got {:?}",
+                other.map(|(_, resp)| resp.status())
+            ),
         }
     }
 
@@ -619,7 +648,9 @@ mod tests {
         let addr = spawn_app(store.clone(), bus.clone(), vec![]).await;
         let client = reqwest::Client::new();
         let status = |host: &'static str| {
-            let req = client.get(format!("http://{addr}/stats")).header("host", host);
+            let req = client
+                .get(format!("http://{addr}/stats"))
+                .header("host", host);
             async move { req.send().await.unwrap().status().as_u16() }
         };
         // router() no longer depends on the bind, so this covers a 0.0.0.0 container bind too.
@@ -638,9 +669,16 @@ mod tests {
             raw.write_all(request.as_bytes()).await.unwrap();
             let mut reply = Vec::new();
             raw.read_to_end(&mut reply).await.unwrap();
-            String::from_utf8_lossy(&reply).lines().next().unwrap_or_default().to_string()
+            String::from_utf8_lossy(&reply)
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .to_string()
         };
-        assert_eq!(raw_status("GET /stats HTTP/1.0\r\n\r\n").await, "HTTP/1.0 403 Forbidden");
+        assert_eq!(
+            raw_status("GET /stats HTTP/1.0\r\n\r\n").await,
+            "HTTP/1.0 403 Forbidden"
+        );
         assert_eq!(
             raw_status("GET http://127.0.0.1:9/stats HTTP/1.0\r\n\r\n").await,
             "HTTP/1.0 200 OK"
@@ -686,7 +724,10 @@ mod tests {
             saw_ping
         })
         .await;
-        assert!(matches!(closed, Ok(true)), "server kept the silent connection open");
+        assert!(
+            matches!(closed, Ok(true)),
+            "server kept the silent connection open"
+        );
     }
 
     #[tokio::test]
@@ -708,7 +749,10 @@ mod tests {
         // Reads 0 bytes once the server closes the socket.
         async fn closed_within(stream: &mut tokio::net::TcpStream, wait: Duration) -> bool {
             let mut buf = [0u8; 64];
-            matches!(tokio::time::timeout(wait, stream.read(&mut buf)).await, Ok(Ok(0) | Err(_)))
+            matches!(
+                tokio::time::timeout(wait, stream.read(&mut buf)).await,
+                Ok(Ok(0) | Err(_))
+            )
         }
 
         let mut slow = tokio::net::TcpStream::connect(addr).await.unwrap();
@@ -729,7 +773,9 @@ mod tests {
         let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/stream"))
             .await
             .unwrap();
-        ws.send(WsMessage::Text("x".repeat(WS_MAX_MESSAGE + 1))).await.unwrap();
+        ws.send(WsMessage::Text("x".repeat(WS_MAX_MESSAGE + 1)))
+            .await
+            .unwrap();
 
         let closed = tokio::time::timeout(Duration::from_secs(2), async {
             while let Some(frame) = ws.next().await {
@@ -754,7 +800,10 @@ mod tests {
         let mut silent = tokio::net::TcpStream::connect(addr).await.unwrap();
         let mut buf = [0u8; 64];
         let read = tokio::time::timeout(HEADER_READ_TIMEOUT * 4, silent.read(&mut buf)).await;
-        assert!(matches!(read, Ok(Ok(0) | Err(_))), "silent socket stayed open");
+        assert!(
+            matches!(read, Ok(Ok(0) | Err(_))),
+            "silent socket stayed open"
+        );
         assert!(started.elapsed() >= HEADER_READ_TIMEOUT / 2);
 
         let mut idle = tokio::net::TcpStream::connect(addr).await.unwrap();
@@ -762,8 +811,13 @@ mod tests {
             .await
             .unwrap();
         let mut reply = Vec::new();
-        let read = tokio::time::timeout(HEADER_READ_TIMEOUT * 4, idle.read_to_end(&mut reply)).await;
+        let read =
+            tokio::time::timeout(HEADER_READ_TIMEOUT * 4, idle.read_to_end(&mut reply)).await;
         assert!(read.is_ok(), "idle keep-alive socket stayed open");
-        assert!(reply.starts_with(b"HTTP/1.1 200"), "{}", String::from_utf8_lossy(&reply));
+        assert!(
+            reply.starts_with(b"HTTP/1.1 200"),
+            "{}",
+            String::from_utf8_lossy(&reply)
+        );
     }
 }

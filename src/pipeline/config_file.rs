@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 // Unknown keys are errors at every level: a misspelled or misplaced `auth:` would
@@ -150,7 +150,10 @@ pub fn merge_with_env(cfg: IndexConfig) -> Result<IndexConfig> {
 }
 
 /// Apply env overrides from `env`. Empty values must not hide values from YAML.
-pub fn merge_with(mut cfg: IndexConfig, env: impl Fn(&str) -> Option<String>) -> Result<IndexConfig> {
+pub fn merge_with(
+    mut cfg: IndexConfig,
+    env: impl Fn(&str) -> Option<String>,
+) -> Result<IndexConfig> {
     let get = |key: &str| env(key).filter(|v| !v.trim().is_empty());
     if let Some(endpoint) = get("YELLOWSTONE_ENDPOINT") {
         cfg.geyser.endpoint = endpoint;
@@ -205,14 +208,16 @@ impl IndexConfig {
         if self.geyser.endpoint.trim().is_empty() {
             bail!("geyser.endpoint must be non-empty (set in YAML or YELLOWSTONE_ENDPOINT)");
         }
-        self.serve
-            .bind
-            .parse::<SocketAddr>()
-            .with_context(|| format!("serve.bind is not a valid socket address: {}", self.serve.bind))?;
+        self.serve.bind.parse::<SocketAddr>().with_context(|| {
+            format!(
+                "serve.bind is not a valid socket address: {}",
+                self.serve.bind
+            )
+        })?;
         if let Some(grpc) = &self.grpc {
-            grpc.bind
-                .parse::<SocketAddr>()
-                .with_context(|| format!("grpc.bind is not a valid socket address: {}", grpc.bind))?;
+            grpc.bind.parse::<SocketAddr>().with_context(|| {
+                format!("grpc.bind is not a valid socket address: {}", grpc.bind)
+            })?;
         }
         if let Some(auth) = &self.auth {
             auth.keys()?;
@@ -233,9 +238,7 @@ mod tests {
         assert_eq!(cfg.store.url, "sqlite:./index.db");
         assert_eq!(cfg.serve.bind, "127.0.0.1:8080");
         assert!(
-            cfg.programs
-                .iter()
-                .any(|p| p.ends_with("pumpFun.json")),
+            cfg.programs.iter().any(|p| p.ends_with("pumpFun.json")),
             "expected pump.fun IDL path"
         );
         assert!(cfg.geyser.endpoint.is_empty());
@@ -284,7 +287,9 @@ mod tests {
     #[test]
     fn empty_env_values_do_not_override_yaml() {
         let env = |key: &str| match key {
-            "YELLOWSTONE_ENDPOINT" | "YELLOWSTONE_AUTH_TOKEN" | "DATABASE_URL" => Some(String::new()),
+            "YELLOWSTONE_ENDPOINT" | "YELLOWSTONE_AUTH_TOKEN" | "DATABASE_URL" => {
+                Some(String::new())
+            }
             "INDEX_API_KEYS" => Some("  ".to_string()),
             _ => None,
         };

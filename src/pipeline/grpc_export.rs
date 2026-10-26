@@ -7,17 +7,17 @@ use anyhow::Result;
 use futures::Stream;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc::error::SendTimeoutError;
-use tokio::sync::{broadcast, mpsc, oneshot, Semaphore};
-use tokio_stream::wrappers::ReceiverStream;
+use tokio::sync::{Semaphore, broadcast, mpsc, oneshot};
 use tokio_stream::StreamExt;
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use tracing::{error, info, warn};
 
-use super::auth::{extract_api_key, ApiKeyState};
+use super::auth::{ApiKeyState, extract_api_key};
 use super::event::IndexEvent;
 use super::metrics as prom;
 use super::serve::slot_fits_i64;
-use super::store::{EventFilter, EventStore, StoreBusy, MAX_EVENT_OFFSET};
+use super::store::{EventFilter, EventStore, MAX_EVENT_OFFSET, StoreBusy};
 
 pub mod proto {
     tonic::include_proto!("index");
@@ -134,7 +134,11 @@ impl IndexExport for ExportService {
         request: Request<GetEventsRequest>,
     ) -> Result<Response<GetEventsResponse>, Status> {
         let req = request.into_inner();
-        let limit = if req.limit == 0 { 100 } else { req.limit.min(500) };
+        let limit = if req.limit == 0 {
+            100
+        } else {
+            req.limit.min(500)
+        };
         let offset = i64::try_from(req.offset)
             .ok()
             .filter(|o| *o <= MAX_EVENT_OFFSET)
@@ -170,7 +174,11 @@ impl IndexExport for ExportService {
                 Some(req.signature)
             },
         };
-        let events = self.store.query_events(filter).await.map_err(store_status)?;
+        let events = self
+            .store
+            .query_events(filter)
+            .await
+            .map_err(store_status)?;
         Ok(Response::new(GetEventsResponse {
             events: events.iter().map(to_msg).collect(),
         }))
@@ -287,7 +295,9 @@ mod tests {
             .unwrap()
             .into_inner();
         for slot in 1..=5 {
-            svc.events.send(transfer(slot, &format!("s{slot}"))).unwrap();
+            svc.events
+                .send(transfer(slot, &format!("s{slot}")))
+                .unwrap();
         }
         let first = stream.next().await.unwrap();
         assert_eq!(first.unwrap_err().code(), tonic::Code::DataLoss);
@@ -308,8 +318,16 @@ mod tests {
             offset,
             ..Default::default()
         };
-        let first = svc.get_events(Request::new(page(0))).await.unwrap().into_inner();
-        let second = svc.get_events(Request::new(page(2))).await.unwrap().into_inner();
+        let first = svc
+            .get_events(Request::new(page(0)))
+            .await
+            .unwrap()
+            .into_inner();
+        let second = svc
+            .get_events(Request::new(page(2)))
+            .await
+            .unwrap()
+            .into_inner();
         assert_eq!(first.events.len(), 2);
         assert_eq!(second.events.len(), 1);
         assert!(second.events[0].json.contains("sig2"));
@@ -323,7 +341,10 @@ mod tests {
 
     #[test]
     fn store_busy_maps_to_unavailable() {
-        assert_eq!(store_status(anyhow::Error::new(StoreBusy)).code(), tonic::Code::Unavailable);
+        assert_eq!(
+            store_status(anyhow::Error::new(StoreBusy)).code(),
+            tonic::Code::Unavailable
+        );
         let other = store_status(anyhow::anyhow!("no such table: secret_tbl"));
         assert_eq!(other.code(), tonic::Code::Internal);
         assert!(!other.message().contains("secret_tbl"));
@@ -343,7 +364,10 @@ mod tests {
         drop(first);
         // The forwarding task sees the closed channel and drops the permit.
         tokio::time::sleep(Duration::from_millis(50)).await;
-        assert!(svc.open_stream(StreamEventsRequest::default(), &SLOTS).is_ok());
+        assert!(
+            svc.open_stream(StreamEventsRequest::default(), &SLOTS)
+                .is_ok()
+        );
     }
 
     #[tokio::test]
@@ -355,10 +379,15 @@ mod tests {
         let stalled = svc.open_stream(StreamEventsRequest::default(), &SLOTS);
         assert!(stalled.is_ok());
         for slot in 0..(STREAM_BUFFER as u64 + 10) {
-            svc.events.send(transfer(slot, &format!("s{slot}"))).unwrap();
+            svc.events
+                .send(transfer(slot, &format!("s{slot}")))
+                .unwrap();
         }
         tokio::time::sleep(STREAM_SEND_TIMEOUT * 3).await;
-        assert!(svc.open_stream(StreamEventsRequest::default(), &SLOTS).is_ok());
+        assert!(
+            svc.open_stream(StreamEventsRequest::default(), &SLOTS)
+                .is_ok()
+        );
 
         // The client gets the buffered events, then an error, not a clean end.
         let items: Vec<_> = stalled.unwrap().into_inner().collect().await;

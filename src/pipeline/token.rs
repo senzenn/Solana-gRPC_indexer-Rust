@@ -121,6 +121,8 @@ mod tests {
     fn ignores_unknown_program() {
         let mut data = vec![TRANSFER];
         data.extend_from_slice(&1u64.to_le_bytes());
-        assert!(parse_token_ix(&ix("11111111111111111111111111111111", &["a", "b"], data)).is_none());
+        assert!(
+            parse_token_ix(&ix("11111111111111111111111111111111", &["a", "b"], data)).is_none()
+        );
     }
 }

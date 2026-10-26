@@ -1,8 +1,8 @@
 use std::time::Duration;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
-use reqwest::{redirect, Client, Url};
+use reqwest::{Client, Url, redirect};
 use tracing::warn;
 
 use super::config_file::SinkConfig;
@@ -28,24 +28,29 @@ impl From<&SinkConfig> for SinkFilter {
 /// Returns true when `event` passes optional kind/program/instruction filters.
 pub fn matches_filter(event: &IndexEvent, filter: &SinkFilter) -> bool {
     if let Some(kinds) = &filter.kinds
-        && !kinds.is_empty() && !kinds.iter().any(|k| k == event.kind()) {
-            return false;
-        }
+        && !kinds.is_empty()
+        && !kinds.iter().any(|k| k == event.kind())
+    {
+        return false;
+    }
     if let Some(programs) = &filter.programs
-        && !programs.is_empty() && !programs.iter().any(|p| p == event.program()) {
-            return false;
-        }
+        && !programs.is_empty()
+        && !programs.iter().any(|p| p == event.program())
+    {
+        return false;
+    }
     if let Some(instructions) = &filter.instructions
-        && !instructions.is_empty() {
-            let ix_name = match event {
-                IndexEvent::ProgramIx { instruction, .. } => Some(instruction.as_str()),
-                _ => None,
-            };
-            match ix_name {
-                Some(name) if instructions.iter().any(|i| i == name) => {}
-                _ => return false,
-            }
+        && !instructions.is_empty()
+    {
+        let ix_name = match event {
+            IndexEvent::ProgramIx { instruction, .. } => Some(instruction.as_str()),
+            _ => None,
+        };
+        match ix_name {
+            Some(name) if instructions.iter().any(|i| i == name) => {}
+            _ => return false,
         }
+    }
     true
 }
 
@@ -149,13 +154,7 @@ impl WebhookSink {
         let mut last_err = None;
 
         for attempt in 1..=WEBHOOK_ATTEMPTS {
-            match self
-                .client
-                .post(self.url.clone())
-                .json(event)
-                .send()
-                .await
-            {
+            match self.client.post(self.url.clone()).json(event).send().await {
                 Ok(resp) if resp.status().is_success() => return Ok(()),
                 Ok(resp) => {
                     last_err = Some(anyhow!("webhook returned HTTP {}", resp.status()));
@@ -192,7 +191,11 @@ pub fn validate_sinks(configs: &[SinkConfig]) -> Result<()> {
     let errors: Vec<String> = configs
         .iter()
         .enumerate()
-        .filter_map(|(index, cfg)| check_sink(cfg).err().map(|err| format!("sinks[{index}]: {err}")))
+        .filter_map(|(index, cfg)| {
+            check_sink(cfg)
+                .err()
+                .map(|err| format!("sinks[{index}]: {err}"))
+        })
         .collect();
     if errors.is_empty() {
         Ok(())
@@ -226,7 +229,11 @@ pub fn build_sinks(configs: &[SinkConfig]) -> Result<SinkFanout> {
 fn build_sink(cfg: &SinkConfig, client: &Client) -> Result<Box<dyn EventSink + Send + Sync>> {
     match cfg.kind.as_str() {
         "stdout" => Ok(Box::new(StdoutSink::new(cfg))),
-        "webhook" => Ok(Box::new(WebhookSink::new(webhook_url(cfg)?, cfg, client.clone()))),
+        "webhook" => Ok(Box::new(WebhookSink::new(
+            webhook_url(cfg)?,
+            cfg,
+            client.clone(),
+        ))),
         other => bail!("unknown sink kind: {other}"),
     }
 }
@@ -347,7 +354,10 @@ mod tests {
         for index in 1..=4 {
             assert!(err.contains(&format!("sinks[{index}]")), "{err}");
         }
-        assert!(!err.contains("sinks[0]") && !err.contains("sinks[5]"), "{err}");
+        assert!(
+            !err.contains("sinks[0]") && !err.contains("sinks[5]"),
+            "{err}"
+        );
 
         let valid = [configs[0].clone(), configs[5].clone()];
         assert_eq!(build_sinks(&valid).unwrap().sinks.len(), 2);
@@ -367,14 +377,17 @@ mod tests {
         let sink = WebhookSink::new(webhook_url(&cfg).unwrap(), &cfg, webhook_client().unwrap());
         let err = sink.send(&token_transfer_event()).await.unwrap_err();
         let text = format!("{err:#}");
-        assert!(!text.contains("secret-token") && !text.contains("hunter2"), "{text}");
+        assert!(
+            !text.contains("secret-token") && !text.contains("hunter2"),
+            "{text}"
+        );
         assert!(text.contains("127.0.0.1"), "{text}");
     }
 
     #[tokio::test]
     async fn webhook_does_not_follow_redirects() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
 
         let followed = Arc::new(AtomicUsize::new(0));
         let hits = followed.clone();

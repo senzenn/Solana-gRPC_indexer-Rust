@@ -2,12 +2,12 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::Result;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{RwLock, broadcast};
 use tracing::info;
 
 use super::auth::ApiKeyState;
 use super::metrics as prom;
-use super::serve::{serve, AppState, LiveStats};
+use super::serve::{AppState, LiveStats, serve};
 use super::store::EventStore;
 
 /// Serve the live UI + REST/WS from an existing SQLite/Postgres DB without geyser ingest.

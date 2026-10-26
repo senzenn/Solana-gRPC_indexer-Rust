@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use axum::extract::State;
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::Response;
 
@@ -38,9 +38,13 @@ impl ApiKeyState {
 /// The time depends only on the presented length, not on the key length or content.
 fn ct_eq(key: &[u8], presented: &[u8]) -> bool {
     let len_differs = u8::from(key.len() != presented.len());
-    presented.iter().enumerate().fold(len_differs, |acc, (i, byte)| {
-        acc | (byte ^ key.get(i).copied().unwrap_or(0))
-    }) == 0
+    presented
+        .iter()
+        .enumerate()
+        .fold(len_differs, |acc, (i, byte)| {
+            acc | (byte ^ key.get(i).copied().unwrap_or(0))
+        })
+        == 0
 }
 
 pub async fn require_api_key(
@@ -64,21 +68,23 @@ pub async fn require_api_key(
 
 pub(crate) fn extract_api_key(headers: &HeaderMap) -> Option<&str> {
     if let Some(value) = headers.get("x-api-key")
-        && let Ok(key) = value.to_str() {
-            let key = key.trim();
-            if !key.is_empty() {
-                return Some(key);
-            }
+        && let Ok(key) = value.to_str()
+    {
+        let key = key.trim();
+        if !key.is_empty() {
+            return Some(key);
         }
+    }
 
     if let Some(value) = headers.get(axum::http::header::AUTHORIZATION)
         && let Ok(auth) = value.to_str()
-            && let Some(key) = auth.strip_prefix("Bearer ") {
-                let key = key.trim();
-                if !key.is_empty() {
-                    return Some(key);
-                }
-            }
+        && let Some(key) = auth.strip_prefix("Bearer ")
+    {
+        let key = key.trim();
+        if !key.is_empty() {
+            return Some(key);
+        }
+    }
 
     None
 }
@@ -147,7 +153,10 @@ mod tests {
         );
         assert_eq!(subprotocol_key(&headers), Some("k-1"));
 
-        headers.insert(header::SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_static("k-1, index-key"));
+        headers.insert(
+            header::SEC_WEBSOCKET_PROTOCOL,
+            HeaderValue::from_static("k-1, index-key"),
+        );
         assert!(subprotocol_key(&headers).is_none());
         assert!(subprotocol_key(&HeaderMap::new()).is_none());
     }
