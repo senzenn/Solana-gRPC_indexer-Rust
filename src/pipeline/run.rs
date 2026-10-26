@@ -178,6 +178,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
         slot_parents: BTreeMap::new(),
         sink_drops: 0,
         jump_streak: 0,
+        far_parents: BTreeMap::new(),
     };
     let shutdown = shutdown_signal();
     tokio::pin!(shutdown);
@@ -217,6 +218,9 @@ struct Pipeline {
     slot_parents: BTreeMap<u64, u64>,
     sink_drops: u64,
     jump_streak: u32,
+    /// Parents of far slots seen during a jump streak. Agave sends confirmed slots with
+    /// no parent, so without these the first slots after an accepted jump look like gaps.
+    far_parents: BTreeMap<u64, u64>,
 }
 
 impl Pipeline {
@@ -347,13 +351,20 @@ impl Pipeline {
         };
         let far = |slot: u64| slot.saturating_sub(last) > MAX_SLOT_JUMP;
         match msg {
-            IngestMsg::Slot { slot, status, .. } => {
+            IngestMsg::Slot { slot, parent, status } => {
                 let confirmed = *status == SlotCommitment::Confirmed;
                 if !far(*slot) {
                     if confirmed {
                         self.jump_streak = 0;
+                        self.far_parents.clear();
                     }
                     return Jump::Near;
+                }
+                if let Some(parent) = parent {
+                    self.far_parents.insert(*slot, *parent);
+                    if self.far_parents.len() > MAX_SLOT_PARENTS {
+                        self.far_parents.pop_first();
+                    }
                 }
                 if !confirmed {
                     return Jump::Skip(*slot);
@@ -363,6 +374,7 @@ impl Pipeline {
                     return Jump::Skip(*slot);
                 }
                 self.jump_streak = 0;
+                self.slot_parents.append(&mut self.far_parents);
                 warn!(slot, last_slot = last, "far confirmed slots kept coming; accepting the jump");
                 // Events of this slot and the skipped ones were dropped, so the gap includes `slot`.
                 Jump::Accept {
@@ -585,6 +597,7 @@ mod tests {
             slot_parents: BTreeMap::new(),
             sink_drops: 0,
             jump_streak: 0,
+            far_parents: BTreeMap::new(),
         }
     }
 
@@ -685,6 +698,31 @@ mod tests {
         assert_eq!(p.last_slot, Some(last_far));
         assert_eq!(gaps.len(), 1);
         assert_eq!((gaps[0].from_slot, gaps[0].to_slot), (s + 2, last_far));
+    }
+
+    #[tokio::test]
+    async fn accepted_jump_keeps_parents_of_far_slots() {
+        let db = TempDb::new();
+        let s = 1_000;
+        let far = s + MAX_SLOT_JUMP + 10;
+        let last_far = far + u64::from(JUMP_ACCEPT_STREAK) - 1;
+        let mut p = pipeline(&db.url, Some(s)).await;
+        // Processed comes before confirmed. last_far + 1 was skipped by its leader.
+        p.handle(slot_msg(last_far + 2, Some(last_far), SlotCommitment::Processed))
+            .await
+            .expect("processed");
+        for slot in far..=last_far {
+            p.handle(slot_msg(slot, None, SlotCommitment::Confirmed))
+                .await
+                .expect("far");
+        }
+        p.handle(slot_msg(last_far + 2, None, SlotCommitment::Confirmed))
+            .await
+            .expect("after jump");
+        let gaps = p.store.list_gaps(false).await.expect("gaps");
+        assert_eq!(p.last_slot, Some(last_far + 2));
+        assert_eq!(gaps.len(), 1, "a skipped leader slot is not a gap");
+        assert_eq!((gaps[0].from_slot, gaps[0].to_slot), (s + 1, last_far));
     }
 
     #[test]
