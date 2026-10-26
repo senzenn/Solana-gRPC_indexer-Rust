@@ -120,7 +120,7 @@ The gate:
 ### Diffing IDLs
 
 ```bash
-cargo run -- parser diff ./idls/pump_fun.json ./downloads/pump_fun_new.json
+cargo run -- parser diff ./idls/pumpFun.json ./downloads/pump_fun_new.json
 ```
 
 Exits with code 1 on breaking drift.

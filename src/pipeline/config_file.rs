@@ -191,7 +191,7 @@ pub fn default_config() -> IndexConfig {
         serve: ServeConfig {
             bind: "127.0.0.1:8080".to_string(),
         },
-        programs: vec![PathBuf::from("./idls/pump_fun.json")],
+        programs: vec![PathBuf::from("./idls/pumpFun.json")],
         wallets: Vec::new(),
         sinks: Vec::new(),
         rpc_url: None,
@@ -235,7 +235,7 @@ mod tests {
         assert!(
             cfg.programs
                 .iter()
-                .any(|p| p.ends_with("pump_fun.json")),
+                .any(|p| p.ends_with("pumpFun.json")),
             "expected pump.fun IDL path"
         );
         assert!(cfg.geyser.endpoint.is_empty());

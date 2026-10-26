@@ -29,7 +29,7 @@ serve:
   bind: "127.0.0.1:8080"
 
 programs:
-  - "./idls/pump_fun.json"
+  - "./idls/pumpFun.json"
 
 wallets: []
 
@@ -120,7 +120,7 @@ Three IDL formats load:
 
 | Format | Detected by | Notes |
 |--------|-------------|-------|
-| Codama `rootNode` | `"kind": "rootNode"` | What `pump_fun.json` ships as |
+| Codama `rootNode` | `"kind": "rootNode"` | What `pumpFun.json` ships as |
 | Anchor 0.30+ | `address` + per-instruction `discriminator` | Used as-is |
 | Anchor pre-0.30 | neither of the above | `parser fetch` sets `address`; discriminators are derived when the IDL is parsed. See the [runbook](./operations-runbook.md#fetching-from-chain) |
 

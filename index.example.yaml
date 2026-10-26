@@ -31,7 +31,7 @@ serve:
   bind: "127.0.0.1:8080"
 
 programs:
-  - "./idls/pump_fun.json"
+  - "./idls/pumpFun.json"
 
 wallets: []
 

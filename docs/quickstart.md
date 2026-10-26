@@ -48,7 +48,7 @@ Optional variables are documented in [config-reference.md](./config-reference.md
 cp index.example.yaml index.yaml
 ```
 
-The example config points at `./idls/pump_fun.json` and a public mainnet RPC for backfill. Geyser credentials can stay empty in YAML if you set them in `.env` (env vars override YAML).
+The example config points at `./idls/pumpFun.json` and a public mainnet RPC for backfill. Geyser credentials can stay empty in YAML if you set them in `.env` (env vars override YAML).
 
 Validate the file:
 
@@ -58,7 +58,7 @@ cargo run -- config validate --file index.yaml
 
 ## 4. Register program IDLs (optional)
 
-Sample IDLs ship in `./idls/` (`pump_fun.json`, `pumpFun.json`). To add or refresh an IDL with the idl-drift safety gate:
+Sample IDLs ship in `./idls/` (`pumpFun.json`). To add or refresh an IDL with the idl-drift safety gate:
 
 ```bash
 cargo run -- parser new --idl ./idls/pumpFun.json

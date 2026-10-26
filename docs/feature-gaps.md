@@ -11,7 +11,7 @@ The geyser → decode → store → serve pipeline is the product. Shipstern is 
 | Claim | Where |
 |-------|-------|
 | Anchor IDL decode (name, args, named accounts) | `src/pipeline/idl.rs` (`IdlRouter`, 8-byte discriminator) |
-| Codama `rootNode` IDLs (what `pump_fun.json` is) | `vendor/idl-drift/src/codama_convert.rs` |
+| Codama `rootNode` IDLs (what `pumpFun.json` is) | `vendor/idl-drift/src/codama_convert.rs` |
 | Pre-0.30 Anchor IDLs (no `address`, no discriminators) | `idl_fetch.rs` stamps the id, `model.rs` derives `sha256("global:<fn>")[..8]` |
 | Borsh scalars incl. `f32` / `f64` | `model.rs` `Type`, `src/pipeline/decode_args.rs` |
 | `/events` filter indexes on `kind` / `program` | `migrations/*/003_events_filter_indexes.sql` |
