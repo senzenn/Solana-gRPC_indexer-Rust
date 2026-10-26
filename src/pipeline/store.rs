@@ -960,6 +960,7 @@ pub fn detect_gap(last: Option<u64>, next: u64) -> Option<(u64, u64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pipeline::testutil::TempDb;
     use crate::pipeline::event::{IndexEvent, TOKEN_PROGRAM};
 
     #[test]
@@ -972,8 +973,8 @@ mod tests {
 
     #[tokio::test]
     async fn cursor_survives_reopen() {
-        let path = std::env::temp_dir().join(format!("index-cursor-{}.db", std::process::id()));
-        let url = format!("sqlite:{}", path.display());
+        let db = TempDb::new();
+        let url = db.url.clone();
         {
             let store = EventStore::open(&url).await.unwrap();
             store.commit_cursor(99).await.unwrap();
@@ -983,13 +984,12 @@ mod tests {
             let cursor = store.load_cursor().await.unwrap().unwrap();
             assert_eq!(cursor.slot, 99);
         }
-        let _ = std::fs::remove_file(&path);
     }
 
     #[tokio::test]
     async fn duplicate_event_is_ignored() {
-        let path = std::env::temp_dir().join(format!("index-dup-{}.db", std::process::id()));
-        let url = format!("sqlite:{}", path.display());
+        let db = TempDb::new();
+        let url = db.url.clone();
         let store = EventStore::open(&url).await.unwrap();
         let event = IndexEvent::TokenTransfer {
             slot: 1,
@@ -1006,7 +1006,6 @@ mod tests {
         };
         assert!(store.write_event(&event).await.unwrap());
         assert!(!store.write_event(&event).await.unwrap());
-        let _ = std::fs::remove_file(&path);
     }
 
     fn token_transfer(slot: u64, signature: &str) -> IndexEvent {
@@ -1057,8 +1056,8 @@ mod tests {
 
     #[tokio::test]
     async fn query_events_applies_filters() {
-        let path = std::env::temp_dir().join(format!("index-query-{}.db", std::process::id()));
-        let url = format!("sqlite:{}", path.display());
+        let db = TempDb::new();
+        let url = db.url.clone();
         let store = EventStore::open(&url).await.unwrap();
 
         store.write_event(&token_transfer(10, "sig-a")).await.unwrap();
@@ -1142,13 +1141,12 @@ mod tests {
             .unwrap();
         assert_eq!(paged.len(), 1);
 
-        let _ = std::fs::remove_file(&path);
     }
 
     #[tokio::test]
     async fn cursor_info_and_gap_queries() {
-        let path = std::env::temp_dir().join(format!("index-gaps-{}.db", std::process::id()));
-        let url = format!("sqlite:{}", path.display());
+        let db = TempDb::new();
+        let url = db.url.clone();
         let store = EventStore::open(&url).await.unwrap();
 
         assert!(store.cursor_info().await.unwrap().is_none());
@@ -1174,13 +1172,12 @@ mod tests {
         assert_eq!(all.len(), 2);
         assert!(all.iter().any(|g| g.from_slot == 10 && g.filled));
 
-        let _ = std::fs::remove_file(&path);
     }
 
     #[tokio::test]
     async fn replay_roundtrip() {
-        let path = std::env::temp_dir().join(format!("index-replay-{}.db", std::process::id()));
-        let url = format!("sqlite:{}", path.display());
+        let db = TempDb::new();
+        let url = db.url.clone();
         let store = EventStore::open(&url).await.unwrap();
 
         let program_ix = IndexEvent::ProgramIx {
@@ -1241,13 +1238,12 @@ mod tests {
         assert_eq!(since.len(), 1);
         assert_eq!(since[0].signature(), Some("replay-sig-2"));
 
-        let _ = std::fs::remove_file(&path);
     }
 
     #[tokio::test]
     async fn replay_detects_and_persists_gaps() {
-        let path = std::env::temp_dir().join(format!("index-replay-gap-{}.db", std::process::id()));
-        let url = format!("sqlite:{}", path.display());
+        let db = TempDb::new();
+        let url = db.url.clone();
         let store = EventStore::open(&url).await.unwrap();
 
         store.commit_cursor(10).await.unwrap();
@@ -1276,13 +1272,12 @@ mod tests {
             .unwrap();
         assert_eq!(gap_events.len(), 1);
 
-        let _ = std::fs::remove_file(&path);
     }
 
     #[tokio::test]
     async fn path_identity_keeps_outer_and_inner_distinct() {
-        let path = std::env::temp_dir().join(format!("index-path-{}.db", std::process::id()));
-        let url = format!("sqlite:{}", path.display());
+        let db = TempDb::new();
+        let url = db.url.clone();
         let store = EventStore::open(&url).await.unwrap();
 
         let outer = token_transfer_at(10, "sig", "0");
@@ -1300,13 +1295,12 @@ mod tests {
             .unwrap();
         assert_eq!(all.len(), 2);
 
-        let _ = std::fs::remove_file(&path);
     }
 
     #[tokio::test]
     async fn upsert_replaces_payload_for_same_path() {
-        let path = std::env::temp_dir().join(format!("index-upsert-{}.db", std::process::id()));
-        let url = format!("sqlite:{}", path.display());
+        let db = TempDb::new();
+        let url = db.url.clone();
         let store = EventStore::open(&url).await.unwrap();
 
         let first = token_transfer_at(10, "sig", "0.1");
@@ -1334,13 +1328,12 @@ mod tests {
             other => panic!("unexpected {other:?}"),
         }
 
-        let _ = std::fs::remove_file(&path);
     }
 
     #[tokio::test]
     async fn apply_finalized_deletes_orphan_slot_events() {
-        let path = std::env::temp_dir().join(format!("index-reorg-{}.db", std::process::id()));
-        let url = format!("sqlite:{}", path.display());
+        let db = TempDb::new();
+        let url = db.url.clone();
         let store = EventStore::open(&url).await.unwrap();
 
         store
@@ -1383,13 +1376,12 @@ mod tests {
         assert_eq!(cursor.finalized_slot, 103);
         assert_eq!(cursor.slot, 103);
 
-        let _ = std::fs::remove_file(&path);
     }
 
     #[tokio::test]
     async fn apply_finalized_skips_delete_when_parents_missing() {
-        let path = std::env::temp_dir().join(format!("index-reorg-skip-{}.db", std::process::id()));
-        let url = format!("sqlite:{}", path.display());
+        let db = TempDb::new();
+        let url = db.url.clone();
         let store = EventStore::open(&url).await.unwrap();
 
         store.write_event(&token_transfer(101, "b")).await.unwrap();
@@ -1406,7 +1398,6 @@ mod tests {
             .unwrap();
         assert_eq!(remaining.len(), 1);
 
-        let _ = std::fs::remove_file(&path);
     }
 
     async fn memory_store() -> EventStore {
@@ -1489,8 +1480,8 @@ mod tests {
 
     #[tokio::test]
     async fn sqlite_store_uses_wal() {
-        let path = std::env::temp_dir().join(format!("index-wal-{}.db", std::process::id()));
-        let store = EventStore::open(&format!("sqlite:{}", path.display()))
+        let db = TempDb::new();
+        let store = EventStore::open(&db.url)
             .await
             .unwrap();
         let DbBackend::Sqlite(pool) = &store.backend else {
@@ -1501,11 +1492,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(mode, "wal");
-
-        drop(store);
-        for suffix in ["", "-wal", "-shm"] {
-            let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
-        }
     }
 
     #[tokio::test]
@@ -1599,8 +1585,8 @@ mod tests {
 
     #[tokio::test]
     async fn migration_marks_legacy_flat_ix_path() {
-        let dir = std::env::temp_dir().join(format!("index-legacy-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let migrations = dir.join("migrations");
         std::fs::create_dir_all(&migrations).unwrap();
         for (name, sql) in [
@@ -1657,9 +1643,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(columns, vec!["legacy:2", "0.1"]);
-
-        drop(store);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

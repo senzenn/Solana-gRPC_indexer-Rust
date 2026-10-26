@@ -401,18 +401,14 @@ async fn send_frame(socket: &mut WebSocket, frame: Message) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pipeline::testutil::TempDb;
     use axum::http::HeaderValue;
     use futures::StreamExt;
     use tokio_tungstenite::tungstenite::Message as WsMessage;
 
-    async fn temp_store(name: &str) -> Arc<EventStore> {
-        let path = std::env::temp_dir().join(format!(
-            "index-serve-{name}-{}-{}.db",
-            std::process::id(),
-            uuid::Uuid::new_v4()
-        ));
-        let url = format!("sqlite:{}", path.display());
-        Arc::new(EventStore::open(&url).await.unwrap())
+    async fn temp_store() -> (Arc<EventStore>, TempDb) {
+        let db = TempDb::new();
+        (Arc::new(EventStore::open(&db.url).await.unwrap()), db)
     }
 
     async fn spawn_app(
@@ -507,7 +503,7 @@ mod tests {
 
     #[tokio::test]
     async fn ws_sends_backlog_oldest_first() {
-        let store = temp_store("backlog").await;
+        let (store, _db) = temp_store().await;
         for slot in 1..=3 {
             store
                 .write_event(&IndexEvent::Slot { slot, parent: None })
@@ -536,7 +532,7 @@ mod tests {
         use tokio_tungstenite::tungstenite::client::IntoClientRequest;
         use tokio_tungstenite::tungstenite::{http, Error};
 
-        let store = temp_store("origin").await;
+        let (store, _db) = temp_store().await;
         let (bus, _) = broadcast::channel(4);
         let addr = spawn_app(store, bus, vec![]).await;
 
@@ -556,7 +552,7 @@ mod tests {
         use tokio_tungstenite::tungstenite::client::IntoClientRequest;
         use tokio_tungstenite::tungstenite::http;
 
-        let store = temp_store("wskey").await;
+        let (store, _db) = temp_store().await;
         let (bus, _) = broadcast::channel(4);
         let addr = spawn_app(store, bus, vec!["s3cret".into()]).await;
 
@@ -574,7 +570,7 @@ mod tests {
     async fn subprotocol_key_only_on_stream_and_query_key_rejected() {
         use tokio_tungstenite::tungstenite::Error;
 
-        let store = temp_store("wsreject").await;
+        let (store, _db) = temp_store().await;
         let (bus, _) = broadcast::channel(4);
         let addr = spawn_app(store, bus, vec!["s3cret".into()]).await;
 
@@ -595,7 +591,7 @@ mod tests {
 
     #[tokio::test]
     async fn ws_reports_lag_to_client() {
-        let store = temp_store("lag").await;
+        let (store, _db) = temp_store().await;
         let (bus, _) = broadcast::channel(2);
         let addr = spawn_app(store, bus.clone(), vec![]).await;
 
@@ -618,7 +614,7 @@ mod tests {
 
     #[tokio::test]
     async fn open_server_accepts_only_ip_or_localhost_host() {
-        let store = temp_store("host").await;
+        let (store, _db) = temp_store().await;
         let (bus, _) = broadcast::channel(4);
         let addr = spawn_app(store.clone(), bus.clone(), vec![]).await;
         let client = reqwest::Client::new();
@@ -669,7 +665,7 @@ mod tests {
 
     #[tokio::test]
     async fn ws_closes_peer_that_never_answers_ping() {
-        let store = temp_store("ping").await;
+        let (store, _db) = temp_store().await;
         let (bus, _) = broadcast::channel(4);
         let addr = spawn_app(store, bus, vec![]).await;
         let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/stream"))
@@ -697,7 +693,7 @@ mod tests {
     async fn accept_loop_drops_slow_headers_and_extra_connections() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-        let store = temp_store("conn").await;
+        let (store, _db) = temp_store().await;
         let (bus, _) = broadcast::channel(4);
         let state = AppState {
             events: bus,
@@ -727,7 +723,7 @@ mod tests {
     async fn ws_closes_on_oversized_frame() {
         use futures::SinkExt;
 
-        let store = temp_store("big").await;
+        let (store, _db) = temp_store().await;
         let (bus, _) = broadcast::channel(4);
         let addr = spawn_app(store, bus, vec![]).await;
         let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/stream"))
@@ -750,7 +746,7 @@ mod tests {
     async fn accept_loop_closes_silent_and_idle_connections() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-        let store = temp_store("idle").await;
+        let (store, _db) = temp_store().await;
         let (bus, _) = broadcast::channel(4);
         let addr = spawn_app(store, bus, vec![]).await;
 

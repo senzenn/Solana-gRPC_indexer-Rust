@@ -19,5 +19,7 @@ pub mod run;
 pub mod serve;
 pub mod sink;
 pub mod store;
+#[cfg(test)]
+pub mod testutil;
 pub mod token;
 pub mod tui;

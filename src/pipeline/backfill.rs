@@ -522,6 +522,7 @@ fn ui_instruction_to_raw(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pipeline::testutil::TempDb;
     use solana_client::rpc_request::RpcResponseErrorData;
 
     fn rpc_error(code: i64) -> ClientError {
@@ -547,14 +548,10 @@ mod tests {
         }
     }
 
-    async fn temp_store(name: &str) -> (Arc<EventStore>, std::path::PathBuf) {
-        let path =
-            std::env::temp_dir().join(format!("index-backfill-{name}-{}.db", std::process::id()));
-        let _ = std::fs::remove_file(&path);
-        let store = EventStore::open(&format!("sqlite:{}", path.display()))
-            .await
-            .unwrap();
-        (Arc::new(store), path)
+    async fn temp_store() -> (Arc<EventStore>, TempDb) {
+        let db = TempDb::new();
+        let store = EventStore::open(&db.url).await.unwrap();
+        (Arc::new(store), db)
     }
 
     async fn open_gaps(store: &EventStore) -> Vec<(u64, u64)> {
@@ -566,7 +563,7 @@ mod tests {
     async fn partial_failure_leaves_only_failed_ranges_open() {
         use solana_client::rpc_custom_error::JSON_RPC_SERVER_ERROR_BLOCK_NOT_AVAILABLE;
 
-        let (store, path) = temp_store("partial").await;
+        let (store, _db) = temp_store().await;
         let mut worker =
             BackfillWorker::new(String::new(), store.clone(), IdlRouter::default(), false);
         worker.max_attempts = 1;
@@ -592,14 +589,13 @@ mod tests {
             None
         );
         assert_eq!(open_gaps(&store).await, [(2, 3), (6, 6)]);
-        let _ = std::fs::remove_file(&path);
     }
 
     #[tokio::test]
     async fn unavailable_gap_is_closed_and_not_requeued() {
         use std::sync::atomic::{AtomicU32, Ordering};
 
-        let (store, path) = temp_store("unavailable").await;
+        let (store, _db) = temp_store().await;
         let worker = BackfillWorker::new(String::new(), store.clone(), IdlRouter::default(), false);
         let calls = AtomicU32::new(0);
         let fetch = |_slot: u64| {
@@ -627,7 +623,6 @@ mod tests {
             }
         })
         .await;
-        let _ = std::fs::remove_file(&path);
         result.expect("unavailable gap was not closed");
         assert_eq!(calls.load(Ordering::SeqCst), 3);
     }
@@ -637,7 +632,7 @@ mod tests {
         use solana_client::rpc_custom_error::JSON_RPC_SERVER_ERROR_BLOCK_NOT_AVAILABLE;
         use std::sync::atomic::{AtomicU32, Ordering};
 
-        let (store, path) = temp_store("rescan").await;
+        let (store, _db) = temp_store().await;
         let mut worker =
             BackfillWorker::new(String::new(), store.clone(), IdlRouter::default(), false);
         worker.max_attempts = 1;
@@ -673,7 +668,6 @@ mod tests {
         })
         .await;
         drop(gap_tx);
-        let _ = std::fs::remove_file(&path);
         result.expect("open gaps were not retried");
         assert!(slot3_calls.load(Ordering::SeqCst) >= 2);
     }

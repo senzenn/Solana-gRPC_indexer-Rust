@@ -207,23 +207,19 @@ pub async fn serve(bind: SocketAddr, service: ExportService, auth: Arc<ApiKeySta
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pipeline::testutil::TempDb;
     use tokio_stream::StreamExt;
     use tonic::metadata::MetadataValue;
 
-    async fn service(name: &str, capacity: usize) -> ExportService {
-        let path = std::env::temp_dir().join(format!(
-            "index-grpc-{name}-{}-{}.db",
-            std::process::id(),
-            uuid::Uuid::new_v4()
-        ));
-        let store = EventStore::open(&format!("sqlite:{}", path.display()))
-            .await
-            .unwrap();
+    async fn service(capacity: usize) -> (ExportService, TempDb) {
+        let db = TempDb::new();
+        let store = EventStore::open(&db.url).await.unwrap();
         let (events, _) = broadcast::channel(capacity);
-        ExportService {
+        let svc = ExportService {
             events,
             store: Arc::new(store),
-        }
+        };
+        (svc, db)
     }
 
     fn transfer(slot: u64, signature: &str) -> IndexEvent {
@@ -271,7 +267,7 @@ mod tests {
 
     #[tokio::test]
     async fn stream_events_reports_lag() {
-        let svc = service("lag", 2).await;
+        let (svc, _db) = service(2).await;
         let mut stream = svc
             .stream_events(Request::new(StreamEventsRequest::default()))
             .await
@@ -286,7 +282,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_events_pages_within_one_slot() {
-        let svc = service("page", 4).await;
+        let (svc, _db) = service(4).await;
         for i in 0..3 {
             svc.store
                 .write_event(&transfer(7, &format!("sig{i}")))
@@ -323,7 +319,7 @@ mod tests {
     #[tokio::test]
     async fn stream_slot_frees_when_stream_drops() {
         static SLOTS: Semaphore = Semaphore::const_new(1);
-        let svc = service("slots", 4).await;
+        let (svc, _db) = service(4).await;
 
         let first = svc.open_stream(StreamEventsRequest::default(), &SLOTS);
         assert!(first.is_ok());
@@ -340,7 +336,7 @@ mod tests {
     #[tokio::test]
     async fn stalled_stream_frees_slot_after_send_timeout() {
         static SLOTS: Semaphore = Semaphore::const_new(1);
-        let svc = service("stall", 1024).await;
+        let (svc, _db) = service(1024).await;
 
         // The client holds the stream but never reads it.
         let stalled = svc.open_stream(StreamEventsRequest::default(), &SLOTS);

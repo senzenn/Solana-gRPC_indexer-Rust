@@ -498,6 +498,7 @@ async fn emit_gap(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pipeline::testutil::TempDb;
     use std::time::Duration;
 
     #[test]
@@ -544,8 +545,8 @@ mod tests {
 
     #[tokio::test]
     async fn emit_gap_does_not_block_when_gap_queue_is_full_or_absent() {
-        let path = std::env::temp_dir().join(format!("index-run-gap-{}.db", std::process::id()));
-        let store = EventStore::open(&format!("sqlite:{}", path.display()))
+        let db = TempDb::new();
+        let store = EventStore::open(&db.url)
             .await
             .expect("open store");
         let (bus, _) = broadcast::channel(16);
@@ -561,17 +562,9 @@ mod tests {
             anyhow::Ok(())
         };
         let result = tokio::time::timeout(Duration::from_secs(10), emit).await;
-        let _ = std::fs::remove_file(&path);
         result
             .expect("emit_gap blocked on the gap queue")
             .expect("emit_gap");
-    }
-
-    fn temp_db(name: &str) -> (std::path::PathBuf, String) {
-        let path = std::env::temp_dir().join(format!("index-run-{name}-{}.db", std::process::id()));
-        let _ = std::fs::remove_file(&path);
-        let url = format!("sqlite:{}", path.display());
-        (path, url)
     }
 
     async fn pipeline(url: &str, last_slot: Option<u64>) -> Pipeline {
@@ -621,9 +614,9 @@ mod tests {
 
     #[tokio::test]
     async fn event_slots_do_not_move_cursor_or_open_gaps() {
-        let (path, url) = temp_db("events");
+        let db = TempDb::new();
         let s = 1_000;
-        let mut p = pipeline(&url, Some(s)).await;
+        let mut p = pipeline(&db.url, Some(s)).await;
         p.handle(transfer_at(s + 5)).await.expect("events");
         p.handle(slot_msg(s + 1, Some(s), SlotCommitment::Confirmed))
             .await
@@ -631,7 +624,6 @@ mod tests {
         let cursor = p.store.load_cursor().await.expect("cursor").expect("some");
         let gaps = p.store.list_gaps(false).await.expect("gaps");
         let events = p.store.recent_events(10).await.expect("events");
-        let _ = std::fs::remove_file(&path);
         assert_eq!(cursor.slot, s + 1);
         assert_eq!(p.resume_slot.load(Ordering::Relaxed), s + 1);
         assert!(gaps.is_empty(), "unexpected gaps: {}", gaps.len());
@@ -640,22 +632,21 @@ mod tests {
 
     #[tokio::test]
     async fn dead_slot_keeps_its_row() {
-        let (path, url) = temp_db("dead");
-        let mut p = pipeline(&url, Some(100)).await;
+        let db = TempDb::new();
+        let mut p = pipeline(&db.url, Some(100)).await;
         p.handle(slot_msg(101, Some(100), SlotCommitment::Dead))
             .await
             .expect("dead");
         let slots = p.store.slots_between(100, 101).await.expect("slots");
-        let _ = std::fs::remove_file(&path);
         assert_eq!(slots, vec![101]);
     }
 
     #[tokio::test]
     async fn far_slots_are_skipped_until_they_persist() {
-        let (path, url) = temp_db("jump");
+        let db = TempDb::new();
         let s = 1_000;
         let far = s + MAX_SLOT_JUMP + 10;
-        let mut p = pipeline(&url, Some(s)).await;
+        let mut p = pipeline(&db.url, Some(s)).await;
         p.handle(transfer_at(far)).await.expect("events");
         p.handle(slot_msg(far, Some(far - 1), SlotCommitment::Finalized))
             .await
@@ -691,7 +682,6 @@ mod tests {
                 .expect("far");
         }
         let gaps = p.store.list_gaps(false).await.expect("gaps");
-        let _ = std::fs::remove_file(&path);
         assert_eq!(p.last_slot, Some(last_far));
         assert_eq!(gaps.len(), 1);
         assert_eq!((gaps[0].from_slot, gaps[0].to_slot), (s + 2, last_far));
