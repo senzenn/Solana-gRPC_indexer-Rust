@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use serde::Serialize;
-use sqlx::postgres::PgPoolOptions;
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::{postgres::PgPool, QueryBuilder, Row, Sqlite, SqlitePool};
 use tokio::sync::{Semaphore, SemaphorePermit};
@@ -22,6 +22,8 @@ const POOL_CONNECTIONS: u32 = 5;
 /// API reads share the pool with ingest. Keep 2 connections free for ingest writes.
 const API_READ_PERMITS: usize = POOL_CONNECTIONS as usize - 2;
 const API_READ_WAIT: Duration = Duration::from_secs(5);
+/// Same limit as the SQLite busy wait. A runaway query must not hold a pool connection.
+const PG_STATEMENT_TIMEOUT: &str = "30s";
 /// Postgres btree index rows have a size limit. IDL names are not trusted.
 const MAX_PROGRAM_BYTES: usize = 128;
 
@@ -114,7 +116,7 @@ impl EventStore {
         if database_url.starts_with("postgres://") || database_url.starts_with("postgresql://") {
             let pool = PgPoolOptions::new()
                 .max_connections(POOL_CONNECTIONS)
-                .connect(database_url)
+                .connect_with(pg_options(database_url)?)
                 .await
                 .with_context(|| format!("connect postgres {}", redact_url(database_url)))?;
             let store = Self::new(DbBackend::Postgres(pool));
@@ -858,6 +860,20 @@ fn redact_url(database_url: &str) -> String {
         .unwrap_or_else(|| "<unparsable url>".to_string())
 }
 
+fn pg_options(database_url: &str) -> Result<PgConnectOptions> {
+    // The parse error can quote the URL, so it is not chained.
+    let options = PgConnectOptions::from_str(database_url)
+        .map_err(|_| anyhow::anyhow!("parse postgres url {}", redact_url(database_url)))?;
+    // Postgres takes the last -c value, so a timeout set in the URL must not get a second one.
+    if options
+        .get_options()
+        .is_some_and(|set| set.contains("statement_timeout"))
+    {
+        return Ok(options);
+    }
+    Ok(options.options([("statement_timeout", PG_STATEMENT_TIMEOUT)]))
+}
+
 fn apply_event_filter<'a>(qb: &mut QueryBuilder<'a, Sqlite>, filter: &EventFilter) {
     if let Some(since_slot) = filter.since_slot {
         qb.push(" AND slot >= ");
@@ -1476,6 +1492,17 @@ mod tests {
         let msg = format!("{err:#}");
         assert!(msg.contains("\"mysql\""));
         assert!(!msg.contains("S3cret"));
+    }
+
+    #[test]
+    fn pg_options_add_statement_timeout_unless_url_sets_it() {
+        let opts = pg_options("postgres://u:S3cret@db/x?options[search_path]=idx").unwrap();
+        assert_eq!(
+            opts.get_options(),
+            Some("-c search_path=idx -c statement_timeout=30s")
+        );
+        let opts = pg_options("postgres://u:S3cret@db/x?options[statement_timeout]=5s").unwrap();
+        assert_eq!(opts.get_options(), Some("-c statement_timeout=5s"));
     }
 
     #[tokio::test]

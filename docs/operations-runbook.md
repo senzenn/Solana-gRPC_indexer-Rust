@@ -394,6 +394,7 @@ worth it for any store that gets queried.
 | WebSocket message / frame from a client | 4 KiB | Connection closed |
 | WebSocket ping | every 30s | A peer that sends nothing back for a full interval is closed |
 | API DB reads | 3 of 5 connections, 5s wait | HTTP `503 {"error":"busy"}`, gRPC `UNAVAILABLE` |
+| Postgres statement time | 30s (`statement_timeout`) | The query is canceled. Set `options[statement_timeout]=<value>` in the database URL to change it |
 | gRPC streams per connection | 64 | HTTP/2 setting; the client cannot open more |
 | gRPC `StreamEvents` streams per process | 256 | `RESOURCE_EXHAUSTED` |
 | gRPC `StreamEvents` slow reader | 10s | When its buffer is full and it reads nothing for 10s, the stream ends with status OK and frees its slot |
