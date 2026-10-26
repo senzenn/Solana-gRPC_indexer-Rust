@@ -12,8 +12,8 @@ use idl_drift::{coverage, diff, Severity};
 use solana_sdk::pubkey::Pubkey;
 use tracing::warn;
 
-use super::decode_args;
 use super::event::{IndexEvent, NamedAccount, RawInstruction};
+use super::{compiled, decode_args};
 
 /// Instruction router built from one or more program IDLs.
 #[derive(Debug, Default, Clone)]
@@ -92,7 +92,11 @@ impl IdlRouter {
     }
 
     pub fn parse(&self, ix: &RawInstruction) -> Option<IndexEvent> {
-        let program = self.programs.get(&ix.program_id)?;
+        // An IDL file wins over a compiled parser. idl_watch can then fix a
+        // program upgrade without a new build.
+        let Some(program) = self.programs.get(&ix.program_id) else {
+            return compiled::parse(ix);
+        };
         let index = program
             .disc_lens
             .iter()
@@ -221,7 +225,7 @@ fn named_accounts_from_ix(
             account_pubkeys.get(index).map(|pubkey| NamedAccount {
                 name: name.to_string(),
                 pubkey: pubkey.clone(),
-                writable,
+                writable: Some(writable),
             })
         })
         .collect();
@@ -493,7 +497,7 @@ mod tests {
                 let named = named_accounts.unwrap();
                 assert_eq!(named.len(), 1);
                 assert_eq!(named[0].name, "pool");
-                assert!(named[0].writable);
+                assert_eq!(named[0].writable, Some(true));
                 assert_eq!(named[0].pubkey, "pool_pubkey");
             }
             other => panic!("{other:?}"),

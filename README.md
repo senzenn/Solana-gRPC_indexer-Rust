@@ -115,6 +115,7 @@ Compose publishes on `127.0.0.1` only and passes the geyser `x-token` from `.env
 ## What works
 
 - Anchor IDL decode (instruction name, args, named accounts)
+- Compiled shipstern parsers from IDLs in `parsers/` (see [parsers/README.md](parsers/README.md))
 - Configurable geyser filters (`track_tokens`, `track_failed`, `accounts_include`)
 - CPI-stable `ix_path` identity + upsert (geyser and RPC backfill)
 - Confirmed + finalized cursors with orphan-slot rollback

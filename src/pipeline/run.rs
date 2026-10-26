@@ -10,6 +10,7 @@ use tokio::task::{JoinError, JoinSet};
 use tracing::{info, warn};
 
 use super::auth::ApiKeyState;
+use super::compiled;
 use super::config_file::SinkConfig;
 use super::event::IndexEvent;
 use super::idl::IdlRouter;
@@ -60,8 +61,16 @@ pub async fn run(args: RunArgs) -> Result<()> {
     info!(resume_slot = ?from_slot, "loaded cursor");
 
     let router = IdlRouter::from_dir(&args.idl_dir)?;
-    let extra_programs = router.program_ids();
+    let mut extra_programs = router.program_ids();
     info!(programs = extra_programs.len(), "loaded IDL parsers");
+    for id in compiled::program_ids() {
+        if extra_programs.contains(&id) {
+            info!(program = %id, "IDL file overrides the compiled parser");
+        } else {
+            info!(program = %id, "use compiled parser");
+            extra_programs.push(id);
+        }
+    }
 
     let sink_configs = sinks_for_mode(args.sinks, args.tui);
     let sink_tx = if sink_configs.is_empty() {

@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
+use super::compiled;
 use super::idl::{install_idl, printable, IdlRouter};
 use super::idl_fetch::fetch_idl_json;
 
@@ -34,12 +35,17 @@ pub fn add_idl(idl_dir: &Path, idl_path: &Path, force: bool) -> Result<()> {
 pub fn list_idls(idl_dir: &Path) -> Result<()> {
     let router = IdlRouter::from_dir(idl_dir)?;
     let ids = router.program_ids();
-    if ids.is_empty() {
-        println!("no IDLs in {}", idl_dir.display());
+    let compiled_ids = compiled::program_ids();
+    if ids.is_empty() && compiled_ids.is_empty() {
+        println!("no IDLs in {} and no compiled parsers", idl_dir.display());
         return Ok(());
     }
-    for id in ids {
-        println!("{}", printable(&id));
+    for id in &ids {
+        println!("{}", printable(id));
+    }
+    for id in compiled_ids {
+        let note = if ids.contains(&id) { "compiled, overridden by IDL file" } else { "compiled" };
+        println!("{id} ({note})");
     }
     Ok(())
 }

@@ -33,7 +33,7 @@ The geyser → decode → store → serve pipeline is the product. Shipstern is 
 |---------------------|-----------------------|------------|
 | Native / SPL / Token-2022 program decoders | Built-in `AccountParser` + `InstructionParser` | `crates/spl-token-parser`, `crates/spl-token-extensions-parser` |
 | BPF loader / stake pool | Built-in parsers | `crates/bpf-loader-parser`, `crates/stake-pool-parser` |
-| Non-Anchor programs with no IDL | `include_shipstern_parser!("idl.json")` | `crates/proc-macro` |
+| Non-Anchor programs with no IDL | `include_shipstern_parser!("idl.json")`. Done: `parsers/` + `src/pipeline/compiled.rs` (instructions only, no `AccountParser` or `program-events` yet) | `crates/proc-macro` |
 | Metaplex | Fixture IDL + generated parser tests | `tests/idls/metaplex.json`, `tests/proc-macro/tests/metaplex.rs` |
 | CPI tree + instruction path | `InstructionUpdate.inner` + `Path` | `crates/core/src/instruction.rs` |
 | `emit!` / program logs | Log attribution onto each ix | `crates/core/src/log_messages.rs`, `tests/proc-macro-events` |

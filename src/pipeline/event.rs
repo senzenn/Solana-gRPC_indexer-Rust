@@ -158,7 +158,9 @@ impl IndexEvent {
 pub struct NamedAccount {
     pub name: String,
     pub pubkey: String,
-    pub writable: bool,
+    /// From the IDL. None for a compiled parser, whose output has no writable flag.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub writable: Option<bool>,
 }
 
 #[derive(Debug, Clone)]

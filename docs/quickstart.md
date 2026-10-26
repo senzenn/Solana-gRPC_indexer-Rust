@@ -78,6 +78,10 @@ Use `--force` to accept breaking IDL changes.
 `parser new` and `parser fetch` write `./idls/<program-id>.json`. If a file
 there already holds the same address, they update that file in place.
 
+For a typed parser built into the binary, put the IDL in `./parsers/` and
+build again. See [parsers/README.md](../parsers/README.md). An IDL file in
+`./idls/` wins over a compiled parser for the same program.
+
 `parser fetch` pulls the IDL straight off chain and works with pre-0.30 Anchor
 IDLs, which omit the program address and instruction discriminators. Fetch
 always sets the address to `--program-id`; discriminators are derived when the

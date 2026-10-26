@@ -27,6 +27,10 @@ impl IxPath {
     pub fn outer(&self) -> u32 {
         self.0.first().copied().unwrap_or(0)
     }
+
+    pub fn indices(&self) -> &[u32] {
+        &self.0
+    }
 }
 
 impl fmt::Display for IxPath {
