@@ -397,7 +397,7 @@ worth it for any store that gets queried.
 | Postgres statement time | 30s (`statement_timeout`) | The query is canceled. Set `options[statement_timeout]=<value>` in the database URL to change it |
 | gRPC streams per connection | 64 | HTTP/2 setting; the client cannot open more |
 | gRPC `StreamEvents` streams per process | 256 | `RESOURCE_EXHAUSTED` |
-| gRPC `StreamEvents` slow reader | 10s | When its buffer is full and it reads nothing for 10s, the stream ends with status OK and frees its slot |
+| gRPC `StreamEvents` slow reader | 10s | When its buffer is full and it reads nothing for 10s, the slot is freed. The client gets the buffered events, then `DATA_LOSS`. Resync with `GetEvents` |
 | gRPC in-flight requests per connection | 64 | Requests wait |
 | gRPC request timeout | 30s, to response headers only | Open `StreamEvents` streams are not cut |
 | gRPC HTTP/2 keepalive ping | every 30s | A connection that does not answer is closed |

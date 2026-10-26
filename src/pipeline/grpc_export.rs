@@ -6,8 +6,10 @@ use std::time::Duration;
 use anyhow::Result;
 use futures::Stream;
 use tokio::sync::broadcast::error::RecvError;
-use tokio::sync::{broadcast, mpsc, Semaphore};
+use tokio::sync::mpsc::error::SendTimeoutError;
+use tokio::sync::{broadcast, mpsc, oneshot, Semaphore};
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::StreamExt;
 use tonic::{Request, Response, Status};
 use tracing::{error, info, warn};
 
@@ -67,6 +69,7 @@ impl ExportService {
 
         let mut rx = self.events.subscribe();
         let (tx, out) = mpsc::channel(STREAM_BUFFER);
+        let (end_tx, end_rx) = oneshot::channel();
         // The task owns the permit. hyper stops polling a client that does not read, so the
         // send timeout, not the response body, must free the slot.
         tokio::spawn(async move {
@@ -95,13 +98,23 @@ impl ExportService {
                     },
                 };
                 let last = item.is_err();
-                if tx.send_timeout(item, STREAM_SEND_TIMEOUT).await.is_err() || last {
-                    return;
+                match tx.send_timeout(item, STREAM_SEND_TIMEOUT).await {
+                    Ok(()) if !last => {}
+                    Err(SendTimeoutError::Timeout(_)) => {
+                        warn!("grpc stream client did not read in time; stream closed");
+                        let _ = end_tx.send(Status::data_loss(
+                            "client did not read in time; resync with GetEvents",
+                        ));
+                        return;
+                    }
+                    _ => return,
                 }
             }
         });
 
-        Ok(Response::new(Box::pin(ReceiverStream::new(out))))
+        // A stalled client gets the status after the buffered events, not a clean end.
+        let end = futures::stream::once(end_rx).filter_map(|status| status.ok().map(Err));
+        Ok(Response::new(Box::pin(ReceiverStream::new(out).chain(end))))
     }
 }
 
@@ -346,6 +359,11 @@ mod tests {
         }
         tokio::time::sleep(STREAM_SEND_TIMEOUT * 3).await;
         assert!(svc.open_stream(StreamEventsRequest::default(), &SLOTS).is_ok());
-        drop(stalled);
+
+        // The client gets the buffered events, then an error, not a clean end.
+        let items: Vec<_> = stalled.unwrap().into_inner().collect().await;
+        assert_eq!(items.len(), STREAM_BUFFER + 1);
+        let last = items.last().unwrap().as_ref().unwrap_err();
+        assert_eq!(last.code(), tonic::Code::DataLoss);
     }
 }
