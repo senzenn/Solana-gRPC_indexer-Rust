@@ -11,16 +11,20 @@ The geyser → decode → store → serve pipeline is the product. Shipstern is 
 | Claim | Where |
 |-------|-------|
 | Anchor IDL decode (name, args, named accounts) | `src/pipeline/idl.rs` (`IdlRouter`, 8-byte discriminator) |
+| Codama `rootNode` IDLs (what `pump_fun.json` is) | `vendor/idl-drift/src/codama_convert.rs` |
+| Pre-0.30 Anchor IDLs (no `address`, no discriminators) | `idl_fetch.rs` stamps the id, `model.rs` derives `sha256("global:<fn>")[..8]` |
+| Borsh scalars incl. `f32` / `f64` | `model.rs` `Type`, `src/pipeline/decode_args.rs` |
+| `/events` filter indexes on `kind` / `program` | `migrations/*/003_events_filter_indexes.sql` |
 | Opt-in SPL Token / Token-2022 **transfers only** | `src/pipeline/token.rs` (`TRANSFER` / `TRANSFER_CHECKED`) |
 | Inner instructions flattened into the same stream | `src/pipeline/ingest.rs` (`meta.inner_instructions`) |
 | Geyser filters | `track_tokens`, `track_failed`, `accounts_include` |
 | Cursor resume + gap detect + RPC backfill | `store.rs`, `run.rs`, `backfill.rs` |
-| Store unique key | `UNIQUE(signature, ix_index, kind)` in `migrations/*/001_events_pipeline.sql` |
+| Store unique key | `UNIQUE(signature, ix_path, kind)` in `migrations/*/002_ix_path_and_finalized.sql` |
 | Webhook + stdout sinks with kind/program/ix routing | `src/pipeline/sink.rs` (`EventSink` trait, two impls) |
 | SQLite or Postgres | `EventStore` |
 | Prometheus `/metrics` | `src/pipeline/metrics.rs` |
 | REST `/events` + WS `/stream` + gRPC export | `serve.rs`, `grpc_export.rs` |
-| `parser fetch` / `parser watch` (Anchor on-chain IDL) | `idl_fetch.rs`, `idl_watch.rs` |
+| `parser fetch` / `parser watch` (Anchor on-chain IDL, incl. pre-0.30) | `idl_fetch.rs` (stamps `address`), `model.rs` (derives `sha256("global:<fn>")[..8]`) |
 | Commitment | `Confirmed` only (`ingest.rs` `SubscribeRequest`) |
 
 ## Steal map
@@ -29,7 +33,7 @@ The geyser → decode → store → serve pipeline is the product. Shipstern is 
 |---------------------|-----------------------|------------|
 | Native / SPL / Token-2022 program decoders | Built-in `AccountParser` + `InstructionParser` | `crates/spl-token-parser`, `crates/spl-token-extensions-parser` |
 | BPF loader / stake pool | Built-in parsers | `crates/bpf-loader-parser`, `crates/stake-pool-parser` |
-| Codama / non-Anchor IDLs | `include_shipstern_parser!("idl.json")` | `crates/proc-macro` |
+| Non-Anchor programs with no IDL | `include_shipstern_parser!("idl.json")` | `crates/proc-macro` |
 | Metaplex | Fixture IDL + generated parser tests | `tests/idls/metaplex.json`, `tests/proc-macro/tests/metaplex.rs` |
 | CPI tree + instruction path | `InstructionUpdate.inner` + `Path` | `crates/core/src/instruction.rs` |
 | `emit!` / program logs | Log attribution onto each ix | `crates/core/src/log_messages.rs`, `tests/proc-macro-events` |
@@ -54,13 +58,13 @@ Do not copy shipstern's lack of a queryable event store. That is this product's 
 
 **Steal:** `shipstern-spl-token-parser`, `shipstern-spl-token-extensions-parser` (extensions under `crates/spl-token-extensions-parser/src/extensions/`), `shipstern-bpf-loader-parser`, Metaplex via `include_shipstern_parser!`. Wire as built-in routers next to `IdlRouter`, not as JSON IDLs.
 
-### CPI tree, not a flat list
+### CPI tree
 
-Inner instructions are ingested, then flattened. `ix_index` is a running counter across outer + inner. There is no tree, no `Path`, no parent ix, no stack height.
+Done in part: each event stores `ix_path` (for example `0.2.1`), built from
+stack heights, the same for geyser and RPC backfill. The parent of an inner
+instruction is its path prefix. Still missing: log ranges per instruction.
 
-That loses which program invoked which, and it makes geyser vs RPC numbering diverge (see idempotency below).
-
-**Steal:** `InstructionUpdate { inner, path, log_range }` in `crates/core/src/instruction.rs`. Persist `path` (for example `0.2.1`) instead of a flat index.
+**Steal:** `InstructionUpdate { inner, path, log_range }` in `crates/core/src/instruction.rs`.
 
 ### Event / log (`emit!`) decode
 
@@ -86,21 +90,16 @@ Keep the flat log as bronze. Add gold tables later (for example `token_transfers
 
 ### Reorg / commitment
 
-Subscribe is `CommitmentLevel::Confirmed` only. Cursor is last slot seen. There is no `finalized` vs `confirmed`, no orphan rollback, no parent-slot walk on fork.
-
-Confirmed slots can be skipped. Events from a losing fork stay in the store.
-
-**Steal:** `crates/block-coordinator` (`BlockMachineCoordinator` + `AccountCommitAt`). Minimum viable here: dual cursor (`confirmed_slot`, `finalized_slot`) and delete-or-tombstone events whose slot is not an ancestor of the new finalized head.
+Done: dual cursor (confirmed `slot`, `finalized_slot`), parent-chain walk on
+each finalized update, and delete of events from orphaned slots (dead slot
+rows go at finalization too). See
+the [runbook](./operations-runbook.md#cursor-semantics).
 
 ### Replay idempotency
 
-The unique key is `(signature, ix_index, kind)`. That is not enough:
-
-- Flattened inner-ix `ix_index` is not stable across geyser vs `getTransaction` backfill.
-- Re-decode after IDL watch can change `kind` or payload without a new key.
-- Gap fill can insert the same logical ix under a different index.
-
-**Need:** stable identity, for example `(signature, ix_path, kind)` plus `ON CONFLICT` upsert. Document that backfill is idempotent in the runbook once the key is path-based.
+Done: events upsert on `(signature, ix_path, kind)`, so geyser replay and RPC
+backfill do not add duplicate rows. Rows from before migration 005 carry
+`ix_path` `legacy:N` and do not match new paths.
 
 ---
 
@@ -121,9 +120,9 @@ Missing: Kafka / NATS / Redis streams, S3/parquet, a first-class way to register
 
 - `/metrics` is exported. Compose does not run Prometheus or Grafana. Shipstern's `docker-compose.yaml` runs Prometheus + pushgateway; still no Grafana dashboards or alert rules there either. Add a scrape job and a small dashboard (lag, decode errors, sink failures, gap count).
 - Single process. No shard-by-program, no slot-range workers, no coordinated backfill.
-- Ingest channel is `mpsc` 4096. Sinks warn-and-continue on error. No geyser subscribe backpressure, no sink queue bounds, no drop/sample policy.
+- Ingest channel is `mpsc` 4096. Sinks run off the ingest loop on a bounded queue (1024); when it is full, live and backfilled events skip the sinks (they are still stored) and a warning is logged. `indexer_lag_slots` exists.
 
-Minimum: bounded sink queue + `lag_slots` / `sink_queue_depth` gauges + documented behavior when full (block vs drop).
+Still missing: a `sink_queue_depth` gauge and a sink-drop counter.
 
 ---
 
@@ -144,8 +143,8 @@ Biggest levers: decoding breadth, reorg-safe correctness, more sinks.
 
 | P | Item | Why first | Shipstern borrow |
 |---|------|-----------|------------------|
-| P0 | Path-based ix identity + upsert | Makes backfill and CPI work correct | `Path` on `InstructionUpdate` |
-| P0 | Finalized cursor + orphan rollback | Confirmed-only is a correctness hole | `block-coordinator` / commit-at |
+| P0 | Path-based ix identity + upsert | Done: `ix_path` unique key, CPI stack-height paths | `Path` on `InstructionUpdate` |
+| P0 | Finalized cursor + orphan rollback | Done: dual cursor, parent walk, delete orphans | `block-coordinator` / commit-at |
 | P1 | `ProgramEvent` + log/`emit!` decode | Most useful protocol data | `log_messages.rs`, proc-macro-events |
 | P1 | Keep CPI tree (path + parent) | Unlocks P0 + events | `inner` + `Path` |
 | P1 | Full Token + Token-2022 parsers | `track_tokens` is transfer-only | `spl-token-parser`, `spl-token-extensions-parser` |

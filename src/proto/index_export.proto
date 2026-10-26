@@ -18,6 +18,10 @@ message GetEventsRequest {
   uint64 since_slot = 2;
   string kind = 3;
   string program = 4;
+  // Skip this many matching events (max 10000), so one slot can hold more than one page.
+  uint64 offset = 5;
+  uint64 until_slot = 6;
+  string signature = 7;
 }
 
 message IndexEventMsg {

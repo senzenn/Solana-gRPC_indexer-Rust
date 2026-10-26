@@ -17,6 +17,7 @@ pub async fn run_demo(db: String, bind: SocketAddr, api_keys: Vec<String>) -> Re
     let (bus, _) = broadcast::channel::<super::event::IndexEvent>(256);
     let stats = Arc::new(RwLock::new(LiveStats {
         slot: cursor.as_ref().map(|c| c.slot).unwrap_or(0),
+        finalized_slot: cursor.as_ref().map(|c| c.finalized_slot).unwrap_or(0),
         ..Default::default()
     }));
 
@@ -32,11 +33,13 @@ pub async fn run_demo(db: String, bind: SocketAddr, api_keys: Vec<String>) -> Re
                 _ => {}
             }
         }
-        prom::update_live_stats(st.slot, st.lag_slots, st.open_gaps);
+        st.lag_slots = st.slot.saturating_sub(st.finalized_slot);
+        prom::update_live_stats(st.slot, st.finalized_slot, st.lag_slots, st.open_gaps);
     } else {
         let mut st = stats.write().await;
         st.open_gaps = open_gaps;
-        prom::update_live_stats(st.slot, st.lag_slots, st.open_gaps);
+        st.lag_slots = st.slot.saturating_sub(st.finalized_slot);
+        prom::update_live_stats(st.slot, st.finalized_slot, st.lag_slots, st.open_gaps);
     }
 
     let state = AppState {
@@ -45,10 +48,18 @@ pub async fn run_demo(db: String, bind: SocketAddr, api_keys: Vec<String>) -> Re
         store,
     };
     let auth = Arc::new(ApiKeyState::from_keys(api_keys));
+    super::run::warn_if_exposed("demo HTTP server", bind, &auth);
 
     info!(
         %bind,
         "demo mode: serving stored events only (no geyser). open http://{bind}/"
     );
-    serve(bind, state, auth).await
+    tokio::select! {
+        res = serve(bind, state, auth) => res,
+        res = super::run::shutdown_signal() => {
+            res?;
+            info!("shutdown signal received; stopping");
+            Ok(())
+        }
+    }
 }

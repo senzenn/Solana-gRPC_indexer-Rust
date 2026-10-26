@@ -16,7 +16,7 @@ cleanup() {
     kill "${DEMO_PID}" 2>/dev/null || true
     wait "${DEMO_PID}" 2>/dev/null || true
   fi
-  rm -f .smoke-index.db
+  rm -f .smoke-index.db*
 }
 trap cleanup EXIT
 

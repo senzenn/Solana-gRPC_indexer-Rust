@@ -27,8 +27,18 @@ Edit `.env` and set at minimum:
 
 | Variable | Description |
 |----------|-------------|
-| `YELLOWSTONE_ENDPOINT` | Geyser gRPC URL (e.g. `https://your-provider.example.com`) |
+| `YELLOWSTONE_ENDPOINT` | Geyser gRPC URL. Triton or Richat Dragon's Mouth. Local: `http://127.0.0.1:10000`. A `host:port` with no scheme means `https://` unless the host is loopback; a remote plaintext endpoint needs `http://` |
 | `YELLOWSTONE_AUTH_TOKEN` | Provider `x-token` |
+
+Check the endpoint before a long run:
+
+```bash
+cargo run -- probe
+```
+
+`probe` and `run` read `YELLOWSTONE_ENDPOINT` and `YELLOWSTONE_AUTH_TOKEN` from
+the env or `.env`. Do not pass the token (or an endpoint URL that holds a key)
+as `--auth-token` / `--endpoint`: command-line arguments are visible in `ps`.
 
 Optional variables are documented in [config-reference.md](./config-reference.md#environment-variable-overrides).
 
@@ -65,18 +75,34 @@ cargo run -- parser watch   # poll chain for IDL drift
 
 Use `--force` to accept breaking IDL changes.
 
+`parser new` and `parser fetch` write `./idls/<program-id>.json`. If a file
+there already holds the same address, they update that file in place.
+
+`parser fetch` pulls the IDL straight off chain and works with pre-0.30 Anchor
+IDLs, which omit the program address and instruction discriminators. Fetch
+always sets the address to `--program-id`; discriminators are derived when the
+IDL is parsed. Check it registered:
+
+```bash
+cargo run -- parser list
+# dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH
+```
+
+An IDL with an empty or invalid `address` is not listed: it is skipped at load
+with the warning `skip IDL file`.
+
 ## 5. Start the indexer
 
 ```bash
 cargo run -- run --config index.yaml
 ```
 
-Equivalent without a config file:
+Add `--tui` for a terminal view; logs then go to `./index.log`, not the screen.
+
+Equivalent without a config file (endpoint and token come from `.env`):
 
 ```bash
-cargo run -- run \
-  --endpoint "$YELLOWSTONE_ENDPOINT" \
-  --auth-token "$YELLOWSTONE_AUTH_TOKEN"
+cargo run -- run
 ```
 
 On startup the process loads the SQLite cursor from `./index.db` (or your configured store) and resumes from the last committed slot.
@@ -89,7 +115,9 @@ open http://127.0.0.1:8080
 
 The HTML table at `/` shows decoded events in real time. WebSocket clients can connect to `WS /stream`.
 
-Protected routes (`/events`, `/stream`, `/cursor`, `/gaps`, `/stats`) require an API key when `auth.api_keys` or `INDEX_API_KEYS` is set. `/`, `/health`, and `/metrics` stay public.
+The server binds `127.0.0.1:8080` by default. A non-loopback bind with no API keys logs a warning. Neither the HTTP server nor the gRPC export has TLS: for a non-loopback bind, set API keys and put a TLS reverse proxy in front that sets `X-Forwarded-Host`. With no keys, the server answers `403` unless the `Host` is `localhost`, `*.localhost` or an IP literal, so open it as `127.0.0.1` or `localhost`, not by a domain name.
+
+Protected routes (`/events`, `/stream`, `/cursor`, `/gaps`, `/stats`) require an API key when `auth.api_keys` or `INDEX_API_KEYS` is set. `/`, `/health`, and `/metrics` stay public and never need a key. `/health` shows `slot`, `finalized_slot`, `events_total` and `open_gaps`. With keys set, open the live view as `http://127.0.0.1:8080/#key=<key>`; the page sends the key as the WebSocket subprotocol `index-key, <key>`. Use only letters, digits and `-._~` in keys.
 
 ## 7. Docker alternative
 
@@ -101,7 +129,10 @@ cp index.example.yaml index.yaml
 docker compose up --build
 ```
 
-The compose file maps port `8080`, persists SQLite under a Docker volume, mounts `./idls`, and uses `./index.yaml` for configuration.
+For a read-only server over the stored events (no geyser credentials), run
+`docker compose --profile demo up --build demo`. It listens on `127.0.0.1:8081`.
+
+The compose file publishes port `8080` on `127.0.0.1` only, persists SQLite under a Docker volume, and mounts `./idls`. It passes `.env` (including the `x-token`) to the container as environment, not as command arguments. To use `./index.yaml`, uncomment its volume line and add `--config /app/index.yaml` to `command`.
 
 ## Next steps
 

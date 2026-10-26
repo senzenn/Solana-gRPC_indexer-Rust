@@ -21,6 +21,8 @@ codama-nodes = "=0.9.1"
 bs58 = "0.5"
 base64 = "0.22"
 owo-colors = "4"
+# Anchor legacy-IDL instruction discriminators: sha256("global:<fn>")[..8].
+sha2 = "0.10"
 
 [[bin]]
 name = "idl-drift"

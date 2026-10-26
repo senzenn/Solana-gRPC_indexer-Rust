@@ -1,21 +1,34 @@
 # Copy to index.yaml and set your geyser credentials.
-# Env vars override: YELLOWSTONE_ENDPOINT, YELLOWSTONE_AUTH_TOKEN, DATABASE_URL, SOLANA_RPC_URL
+# Env vars override: YELLOWSTONE_ENDPOINT, YELLOWSTONE_AUTH_TOKEN, DATABASE_URL, SOLANA_RPC_URL,
+# INDEX_API_KEYS. An empty env var does not override the value here.
+# Unknown keys are errors in every section.
 
 geyser:
+  # host:port with no scheme means https:// unless the host is loopback.
+  # A remote plaintext endpoint needs an explicit http://.
   endpoint: ""
   auth_token: ""
-  # Include failed transactions in the geyser subscription (default: false)
+  # Include failed transactions in the geyser subscription (default: false).
+  # Their program_ix events carry "failed": true.
   track_failed: false
   # Subscribe to SPL Token / Token-2022 programs and parse transfers (default: false)
   track_tokens: false
   # Extra account pubkeys to include in the geyser transaction filter
   accounts_include: []
+  # from_slot on reconnect: auto (probe SubscribeReplayInfo) | on | off
+  replay: auto
+  # Keepalive ping so Triton/Richat load balancers do not drop the stream
+  ping_secs: 10
+  # zstd = Triton/Richat :443; gzip = original Yellowstone / many gateways
+  compression: zstd
 
 store:
   url: "sqlite:./index.db"
 
 serve:
-  bind: "0.0.0.0:8080"
+  # Loopback by default. The server has no TLS. For a non-loopback bind, set
+  # auth.api_keys and put a TLS reverse proxy in front that sets X-Forwarded-Host.
+  bind: "127.0.0.1:8080"
 
 programs:
   - "./idls/pump_fun.json"
@@ -24,6 +37,7 @@ wallets: []
 
 rpc_url: "https://api.mainnet-beta.solana.com"
 
+# A bad sink entry stops startup. Webhooks time out and do not follow redirects.
 sinks:
   - kind: stdout
     # Optional filters (all must match when set):
@@ -31,9 +45,12 @@ sinks:
     # programs: ["pump"]
     # instructions: ["buy", "sell"]
 
-# Optional gRPC export for downstream consumers
+# Optional gRPC export for downstream consumers. With auth.api_keys set, clients
+# send metadata x-api-key or authorization: Bearer. No TLS: same proxy rule as serve.bind.
 # grpc:
-#   bind: "0.0.0.0:50051"
+#   bind: "127.0.0.1:50051"
 
+# Keys: letters, digits and -._~ only, so the live view can send them as a
+# WebSocket subprotocol. Open the live view as http://127.0.0.1:8080/#key=<key>.
 # auth:
 #   api_keys: ["dev-key-change-me"]

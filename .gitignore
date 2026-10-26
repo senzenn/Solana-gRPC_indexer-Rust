@@ -1,5 +1,6 @@
 # Rust
 /target/
+vendor/idl-drift/target/
 **/*.rs.bk
 # lockfile is kept for the binary
 # Cargo.lock

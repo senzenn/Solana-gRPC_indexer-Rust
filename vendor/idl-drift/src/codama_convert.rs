@@ -12,9 +12,10 @@ use crate::model::{
 };
 use codama_nodes::{
     AccountNode, BytesEncoding, BytesValueNode, CountNode, DefaultValueStrategy, DefinedTypeNode,
-    DiscriminatorNode, EnumVariantTypeNode, ErrorNode, EventNode, InstructionAccountNode,
+    DiscriminatorNode, Endian, EnumVariantTypeNode, ErrorNode, EventNode, InstructionAccountNode,
     InstructionInputValueNode, InstructionNode, IsAccountSigner, NestedTypeNodeTrait, NumberFormat,
-    ProgramNode, RootNode, StructFieldTypeNode, StructTypeNode, TypeNode, ValueNode,
+    NumberTypeNode, OptionTypeNode, ProgramNode, RootNode, StructFieldTypeNode, StructTypeNode,
+    TypeNode, ValueNode,
 };
 
 /// Convert a Codama root (and its `program.events`) into the flat semantic IDL.
@@ -182,8 +183,9 @@ fn convert_type_def_ty(t: &TypeNode) -> TypeDefTy {
         TypeNode::Enum(en) => TypeDefTy::Enum {
             variants: en.variants.iter().map(convert_enum_variant).collect(),
         },
-        other => TypeDefTy::Type {
-            alias: convert_type(other),
+        // Convert the original node: the wrappers carry the size layout.
+        _ => TypeDefTy::Type {
+            alias: convert_type(t),
         },
     }
 }
@@ -230,33 +232,41 @@ fn unwrap_wrappers(t: &TypeNode) -> &TypeNode {
 
 fn convert_type(t: &TypeNode) -> Type {
     match t {
-        // Borsh `Vec<T>` / `String` / `Bytes` are size-prefixed.
+        // Borsh `String` / `Bytes` carry a `u32` LE byte-size prefix. Other
+        // size prefixes have no Borsh type here, so keep them unmapped.
         TypeNode::SizePrefix(sp) => match sp.r#type.as_ref() {
-            TypeNode::Array(arr) => Type::Vec(Box::new(convert_type(&arr.item))),
-            TypeNode::String(_) => Type::String,
-            TypeNode::Bytes(_) => Type::Bytes,
-            inner => convert_type(inner),
+            TypeNode::String(_) if is_borsh_len(sp.prefix.get_nested_type_node()) => Type::String,
+            TypeNode::Bytes(_) if is_borsh_len(sp.prefix.get_nested_type_node()) => Type::Bytes,
+            _ => Type::Generic("sizePrefixTypeNode".to_string()),
         },
+        // Fixed-size text is raw bytes on the wire with no length prefix.
         TypeNode::FixedSize(fs) => match fs.r#type.as_ref() {
-            TypeNode::Bytes(_) => Type::Array(Box::new(Type::U8), ArrayLen::Value(fs.size)),
+            TypeNode::Bytes(_) | TypeNode::String(_) => {
+                Type::Array(Box::new(Type::U8), ArrayLen::Value(fs.size))
+            }
             inner => convert_type(inner),
         },
         TypeNode::Array(arr) => match &arr.count {
             CountNode::Fixed(fc) => {
                 Type::Array(Box::new(convert_type(&arr.item)), ArrayLen::Value(fc.value))
             }
-            CountNode::Prefixed(_) | CountNode::Remainder(_) => {
+            CountNode::Prefixed(p) if is_borsh_len(p.prefix.get_nested_type_node()) => {
                 Type::Vec(Box::new(convert_type(&arr.item)))
             }
+            // A `u8`/`u16` count or a remainder array is not a Borsh `Vec`.
+            CountNode::Prefixed(_) => Type::Generic("prefixedCountNode".to_string()),
+            CountNode::Remainder(_) => Type::Generic("remainderCountNode".to_string()),
         },
         TypeNode::Boolean(_) => Type::Bool,
         TypeNode::Number(n) => number_format(n.format),
         TypeNode::PublicKey(_) => Type::Pubkey,
         TypeNode::Bytes(_) => Type::Bytes,
         TypeNode::String(_) => Type::String,
-        TypeNode::Option(o) => Type::Option(Box::new(convert_type(&o.item))),
-        TypeNode::RemainderOption(o) => Type::Option(Box::new(convert_type(&o.item))),
-        TypeNode::ZeroableOption(o) => Type::Option(Box::new(convert_type(&o.item))),
+        TypeNode::Option(o) if is_borsh_option(o) => Type::Option(Box::new(convert_type(&o.item))),
+        TypeNode::Option(_) => Type::Generic("optionTypeNode".to_string()),
+        // These options have no `u8` tag on the wire, unlike Borsh `Option`.
+        TypeNode::RemainderOption(_) => Type::Generic("remainderOptionTypeNode".to_string()),
+        TypeNode::ZeroableOption(_) => Type::Generic("zeroableOptionTypeNode".to_string()),
         TypeNode::Link(link) => Type::Defined {
             name: link.name.to_string(),
             generics: vec![],
@@ -293,6 +303,16 @@ fn convert_type(t: &TypeNode) -> Type {
     }
 }
 
+/// Borsh writes collection lengths as `u32` little-endian.
+fn is_borsh_len(n: &NumberTypeNode) -> bool {
+    n.format == NumberFormat::U32 && n.endian == Endian::Little
+}
+
+/// Borsh `Option`: a `u8` tag, and no payload when the tag is 0.
+fn is_borsh_option(o: &OptionTypeNode) -> bool {
+    !o.fixed && o.prefix.get_nested_type_node().format == NumberFormat::U8
+}
+
 fn number_format(f: NumberFormat) -> Type {
     match f {
         NumberFormat::U8 => Type::U8,
@@ -305,10 +325,10 @@ fn number_format(f: NumberFormat) -> Type {
         NumberFormat::I32 => Type::I32,
         NumberFormat::I64 => Type::I64,
         NumberFormat::I128 => Type::I128,
-        // Not standard Anchor/Borsh integer scalars we model; opaque by design.
-        NumberFormat::F32 | NumberFormat::F64 | NumberFormat::ShortU16 => {
-            Type::Generic(format!("{f:?}").to_lowercase())
-        }
+        NumberFormat::F32 => Type::F32,
+        NumberFormat::F64 => Type::F64,
+        // Not a Borsh scalar we model; opaque by design.
+        NumberFormat::ShortU16 => Type::Generic(format!("{f:?}").to_lowercase()),
     }
 }
 
@@ -319,8 +339,10 @@ fn extract_ix_discriminator(ix: &InstructionNode) -> Discriminator {
         let arg = ix.arguments.iter().find(|a| a.name.as_str() == name)?;
         match arg.default_value.as_ref()? {
             InstructionInputValueNode::Bytes(b) => Some(decode_bytes(b)),
-            InstructionInputValueNode::Number(n) => number_to_bytes(n),
-            InstructionInputValueNode::Constant(c) => value_to_bytes(c.value.as_ref()),
+            InstructionInputValueNode::Number(n) => number_to_bytes(n, &arg.r#type),
+            InstructionInputValueNode::Constant(c) => {
+                value_to_bytes(c.value.as_ref(), c.r#type.as_ref())
+            }
             _ => None,
         }
     })
@@ -360,7 +382,7 @@ fn extract_event_envelope(e: &EventNode) -> (Discriminator, Option<usize>) {
     };
     let mut bytes = Vec::new();
     for constant in &hp.prefix {
-        if let Some(chunk) = value_to_bytes(constant.value.as_ref()) {
+        if let Some(chunk) = value_to_bytes(constant.value.as_ref(), constant.r#type.as_ref()) {
             bytes.extend(chunk);
         }
     }
@@ -375,8 +397,8 @@ fn extract_event_envelope(e: &EventNode) -> (Discriminator, Option<usize>) {
 fn field_default_bytes(field: &StructFieldTypeNode) -> Option<Vec<u8>> {
     match field.default_value.as_ref()? {
         ValueNode::Bytes(b) => Some(decode_bytes(b)),
-        ValueNode::Number(n) => number_to_bytes(n),
-        ValueNode::Constant(c) => value_to_bytes(c.value.as_ref()),
+        ValueNode::Number(n) => number_to_bytes(n, &field.r#type),
+        ValueNode::Constant(c) => value_to_bytes(c.value.as_ref(), c.r#type.as_ref()),
         _ => None,
     }
 }
@@ -390,26 +412,54 @@ fn extract_discriminator(
     };
     match d {
         DiscriminatorNode::Constant(c) => {
-            value_to_bytes(c.constant.value.as_ref()).unwrap_or_default()
+            value_to_bytes(c.constant.value.as_ref(), c.constant.r#type.as_ref())
+                .unwrap_or_default()
         }
         DiscriminatorNode::Field(f) => resolve_field(f.name.as_str()).unwrap_or_default(),
         DiscriminatorNode::Size(_) => Vec::new(),
     }
 }
 
-fn value_to_bytes(v: &ValueNode) -> Option<Vec<u8>> {
+fn value_to_bytes(v: &ValueNode, ty: &TypeNode) -> Option<Vec<u8>> {
     match v {
         ValueNode::Bytes(b) => Some(decode_bytes(b)),
-        ValueNode::Number(n) => number_to_bytes(n),
+        ValueNode::Number(n) => number_to_bytes(n, ty),
         _ => None,
     }
 }
 
-fn number_to_bytes(n: &codama_nodes::NumberValueNode) -> Option<Vec<u8>> {
-    match n.number {
-        codama_nodes::Number::UnsignedInteger(v) => Some(vec![u8::try_from(v).unwrap_or(0)]),
-        _ => None,
+/// Encode a numeric discriminator at the width and byte order of its number
+/// type. A value that does not fit gives no discriminator.
+fn number_to_bytes(n: &codama_nodes::NumberValueNode, ty: &TypeNode) -> Option<Vec<u8>> {
+    let v = match n.number {
+        codama_nodes::Number::UnsignedInteger(v) => i128::from(v),
+        codama_nodes::Number::SignedInteger(v) => i128::from(v),
+        codama_nodes::Number::Float(_) => return None,
+    };
+    // Without a number type, keep the 1-byte tag of native programs.
+    let (format, endian) = match unwrap_wrappers(ty) {
+        TypeNode::Number(nt) => (nt.format, nt.endian),
+        _ => (NumberFormat::U8, Endian::Little),
+    };
+    let mut bytes = match format {
+        NumberFormat::U8 => u8::try_from(v).ok()?.to_le_bytes().to_vec(),
+        NumberFormat::U16 => u16::try_from(v).ok()?.to_le_bytes().to_vec(),
+        NumberFormat::U32 => u32::try_from(v).ok()?.to_le_bytes().to_vec(),
+        NumberFormat::U64 => u64::try_from(v).ok()?.to_le_bytes().to_vec(),
+        NumberFormat::U128 => u128::try_from(v).ok()?.to_le_bytes().to_vec(),
+        NumberFormat::I8 => i8::try_from(v).ok()?.to_le_bytes().to_vec(),
+        NumberFormat::I16 => i16::try_from(v).ok()?.to_le_bytes().to_vec(),
+        NumberFormat::I32 => i32::try_from(v).ok()?.to_le_bytes().to_vec(),
+        NumberFormat::I64 => i64::try_from(v).ok()?.to_le_bytes().to_vec(),
+        NumberFormat::I128 => v.to_le_bytes().to_vec(),
+        // compact-u16 is one byte below 0x80.
+        NumberFormat::ShortU16 => vec![u8::try_from(v).ok().filter(|b| *b < 0x80)?],
+        NumberFormat::F32 | NumberFormat::F64 => return None,
+    };
+    if endian == Endian::Big {
+        bytes.reverse();
     }
+    Some(bytes)
 }
 
 /// Decode a Codama [`BytesValueNode`] to its underlying bytes.
@@ -458,9 +508,15 @@ fn decode_hex(s: &str) -> Vec<u8> {
     } else {
         s.to_string()
     };
-    (0..padded.len())
-        .step_by(2)
-        .filter_map(|i| u8::from_str_radix(&padded[i..i + 2], 16).ok())
+    // Work on bytes: a str slice at an odd offset panics on non-ASCII input.
+    let nibble = |b: u8| char::from(b).to_digit(16);
+    padded
+        .as_bytes()
+        .chunks(2)
+        .filter_map(|pair| match pair {
+            [hi, lo] => u8::try_from(nibble(*hi)? * 16 + nibble(*lo)?).ok(),
+            _ => None,
+        })
         .collect()
 }
 

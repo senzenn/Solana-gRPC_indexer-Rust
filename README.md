@@ -34,11 +34,11 @@ Full setup (IDL registration, Docker, validation): **[docs/quickstart.md](docs/q
 | `index parser new --idl <file>` | Register a program IDL (idl-drift gated) |
 | `index parser list` | List loaded program IDs |
 | `index parser diff <old> <new>` | Diff two IDLs |
-| `index parser fetch --program-id <addr>` | Fetch Anchor IDL from chain |
+| `index parser fetch --program-id <addr>` | Fetch Anchor IDL from chain (stamps the program id, derives legacy discriminators) |
 | `index parser watch` | Poll chain for IDL drift and update local copies |
 | `index config validate` | Validate `index.yaml` |
 | `index demo` | Serve stored events only (no geyser) |
-| `index legacy …` | Old RPC/track/cache commands (hidden) |
+| `index probe` | `GetVersion` + replay check against a Triton/Richat gRPC URL |
 
 ## HTTP API
 
@@ -47,20 +47,30 @@ Full setup (IDL registration, Docker, validation): **[docs/quickstart.md](docs/q
 | `GET /` | Live event table (HTML) |
 | `WS /stream` | Real-time JSON events |
 | `GET /events` | Query historical events (`limit`, `offset`, `since_slot`, `until_slot`, `type`, `program`, `signature`) |
-| `GET /cursor` | Last committed slot |
+| `GET /cursor` | Confirmed + finalized slot |
 | `GET /gaps` | Slot gaps (`open_only=true` default) |
-| `GET /health` | Health check |
+| `GET /health` | Health check, no key: `ok`, `slot`, `finalized_slot`, `events_total`, `open_gaps` |
 | `GET /stats` | Live counters |
-| `GET /metrics` | Prometheus metrics |
+| `GET /metrics` | Prometheus metrics, no key |
 
-Set `auth.api_keys` in `index.yaml` or `INDEX_API_KEYS` env to protect `/events`, `/stream`, `/cursor`, `/gaps`, `/stats`. `/`, `/health`, and `/metrics` stay public.
+The same query routes are also served under `/v1` (`/v1/events`, `/v1/cursor`, `/v1/gaps`, `/v1/stats`, `WS /v1/stream`, `/v1/health`).
+
+Set `auth.api_keys` in `index.yaml` or `INDEX_API_KEYS` env to protect `/events`, `/stream`, `/cursor`, `/gaps`, `/stats` and the `/v1` copies. `/`, `/health`, `/v1/health`, and `/metrics` stay public.
+
+The default bind is `127.0.0.1:8080`; a non-loopback bind with no API keys logs a warning. Neither the HTTP server nor the gRPC export has TLS. For any non-loopback bind, set API keys and put a TLS reverse proxy in front that sets `X-Forwarded-Host`. WebSocket clients send the key as `Sec-WebSocket-Protocol: index-key, <key>` (not `?api_key=`). The live view reads it from the page URL: `http://127.0.0.1:8080/#key=<key>`. Keys must use only letters, digits and `-._~`.
+
+With no API keys, on any bind, every route returns `403` unless `Host` is `localhost`, `*.localhost` or an IP literal (DNS-rebinding guard). A keyless server behind a reverse proxy that sends its domain name as `Host` gets `403`: set keys, or make the proxy send an IP literal such as `Host: 127.0.0.1`. The HTTP API serves HTTP/1.1 only.
+
+`/events` answers `400` for an `offset` above 10000 or a slot above `i64::MAX`, `503 {"error":"busy"}` when the API's DB connections stay busy for 5s, and a generic `500` for store errors. Connection and stream limits: [runbook](docs/operations-runbook.md#server-limits).
 
 ### gRPC export
 
-When `grpc.bind` is set in config or `--grpc-bind 0.0.0.0:50051` is passed to `run`:
+When `grpc.bind` is set in config or `--grpc-bind 127.0.0.1:50051` is passed to `run`:
 
 - `StreamEvents` — live server-stream of parsed events (optional `kind` / `program` filter)
-- `GetEvents` — historical query (same filters as REST)
+- `GetEvents` — historical query (same filters as REST: `offset` max 10000, `until_slot`, `signature`; out-of-range values give `InvalidArgument`)
+
+With API keys set, each call needs metadata `x-api-key: <key>` or `authorization: Bearer <key>`.
 
 Proto: `src/proto/index_export.proto`
 
@@ -70,6 +80,12 @@ Proto: `src/proto/index_export.proto`
 |-----|---------|
 | `sqlite:./index.db` | SQLite (default) |
 | `postgresql://...` | Postgres |
+
+Other URL schemes (for example `mysql://`) are rejected. SQLite runs in WAL mode, so `-wal` and `-shm` files appear next to the database.
+
+Migrations under `migrations/<backend>/` run on startup. `events` is indexed on
+`slot`, `kind`, `program`, and `(signature, ix_path, kind)`, which covers every
+`/events` filter.
 
 ## Config (`index.yaml`)
 
@@ -94,29 +110,22 @@ cp .env.example .env
 docker compose up --build
 ```
 
-See [docs/quickstart.md](docs/quickstart.md#7-docker-alternative) for optional `index.yaml` mounting.
+Compose publishes on `127.0.0.1` only and passes the geyser `x-token` from `.env` as environment. Read-only demo: `docker compose --profile demo up --build demo` on `127.0.0.1:8081`. See [docs/quickstart.md](docs/quickstart.md#7-docker-alternative) for optional `index.yaml` mounting.
 
 ## What works
 
 - Anchor IDL decode (instruction name, args, named accounts)
 - Configurable geyser filters (`track_tokens`, `track_failed`, `accounts_include`)
+- CPI-stable `ix_path` identity + upsert (geyser and RPC backfill)
+- Confirmed + finalized cursors with orphan-slot rollback
 - Cursor resume + gap detection + RPC backfill (`rpc_url`)
 - idl-drift safety on `parser new` / `parser watch`
 - Webhook/stdout sinks with kind/program/instruction routing
 - Postgres or SQLite store
 - Prometheus metrics on `/metrics`
 - gRPC event export
-- `parser fetch` / `parser watch` for on-chain IDL
-- TUI: `index run --tui`
-
-## Legacy commands
-
-RPC slot polling, wallet watch, cache, webhooks, etc. live under:
-
-```bash
-cargo run -- legacy track slots
-cargo run -- legacy yellowstone --endpoint … --auth-token …
-```
+- `parser fetch` / `parser watch` for on-chain IDL (Codama, Anchor 0.30+, and pre-0.30 legacy)
+- TUI: `index run --tui` (logs go to `./index.log`)
 
 ## License
 

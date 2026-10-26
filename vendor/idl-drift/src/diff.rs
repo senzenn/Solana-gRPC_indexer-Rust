@@ -10,7 +10,7 @@
 //!
 //! The four tiers and the exit-code contract mirror oasdiff / GraphQL Inspector.
 
-use crate::model::{AccountItem, Field, GenericArg, Idl, Type, TypeDefTy};
+use crate::model::{AccountItem, EnumFields, Field, GenericArg, Idl, Type, TypeDefTy};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -501,7 +501,7 @@ fn diff_fields(ty: &str, of: &[Field], nf: &[Field], reached: bool, r: &mut Repo
     for pos in 0..max {
         match (of.get(pos), nf.get(pos)) {
             (Some(o), Some(n)) if o != n => {
-                classify_field(ty, pos, &tystr(&o.ty), &tystr(&n.ty), reached, r)
+                classify_field(ty, pos, &tystr(&o.ty), &tystr(&n.ty), reached, r);
             }
             (Some(_), None) => classify_field(ty, pos, "present", "removed", reached, r),
             (None, Some(_)) => classify_field(ty, pos, "absent", "added", reached, r),
@@ -551,6 +551,23 @@ fn diff_variants(
                     );
                 }
             }
+            // Same tag, new payload: the bytes after the tag are read differently.
+            (Some(o), Some(n)) if o.fields != n.fields => {
+                if reached {
+                    r.push(
+                        Severity::Breaking,
+                        format!(
+                            "enum variant payload changed ({ty}#{pos} {}) (Borsh layout)",
+                            n.name
+                        ),
+                    );
+                } else {
+                    r.push(
+                        Severity::Cosmetic,
+                        format!("variant payload changed in UNREACHED enum ({ty}#{pos})"),
+                    );
+                }
+            }
             (None, Some(_)) => {
                 if !reached {
                     r.push(
@@ -597,25 +614,41 @@ pub fn reachable_types(idl: &Idl) -> BTreeSet<String> {
             }
         }
     }
-    // transitive closure through fields of reached types
+    // transitive closure through struct fields, enum variant payloads and
+    // alias targets. A worklist expands each type once, so this is not O(n^2).
     let tm = idl.type_map();
-    let mut changed = true;
-    while changed {
-        changed = false;
-        let snapshot: Vec<String> = reached.iter().cloned().collect();
-        for tname in snapshot {
-            if let Some(td) = tm.get(&tname) {
-                if let TypeDefTy::Struct { fields } = &td.ty {
-                    for f in fields {
-                        let mut refs = Vec::new();
-                        collect_defined_refs(&f.ty, &mut refs);
-                        for r in refs {
-                            if reached.insert(r) {
-                                changed = true;
+    let mut pending: Vec<String> = reached.iter().cloned().collect();
+    while let Some(tname) = pending.pop() {
+        let Some(td) = tm.get(&tname) else { continue };
+        let mut refs = Vec::new();
+        match &td.ty {
+            TypeDefTy::Struct { fields } => {
+                for f in fields {
+                    collect_defined_refs(&f.ty, &mut refs);
+                }
+            }
+            TypeDefTy::Enum { variants } => {
+                for v in variants {
+                    match &v.fields {
+                        EnumFields::Named(fields) => {
+                            for f in fields {
+                                collect_defined_refs(&f.ty, &mut refs);
+                            }
+                        }
+                        EnumFields::Tuple(tys) => {
+                            for t in tys {
+                                collect_defined_refs(t, &mut refs);
                             }
                         }
                     }
                 }
+            }
+            TypeDefTy::Type { alias } => collect_defined_refs(alias, &mut refs),
+        }
+        for r in refs {
+            if !reached.contains(&r) {
+                reached.insert(r.clone());
+                pending.push(r);
             }
         }
     }

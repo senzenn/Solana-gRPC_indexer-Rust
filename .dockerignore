@@ -1,0 +1,15 @@
+# Keep secrets and build output out of the build context and its cache.
+target/
+**/target/
+.git/
+.github/
+.env
+.env.*
+index.yaml
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.log
+*.pem
+*.key

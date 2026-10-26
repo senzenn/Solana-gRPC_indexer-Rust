@@ -36,14 +36,26 @@
     const slotEl = document.getElementById("slot");
     const countEl = document.getElementById("count");
     const wsEl = document.getElementById("ws");
+    // Open as /#key=<api key> when the server has API keys set. The hash is not sent to the server.
+    // The key travels as a WebSocket subprotocol, so use only letters, digits and -._~ in it.
+    const apiKey = new URLSearchParams(location.hash.slice(1)).get("key") || "";
     let n = 0;
+    let retryMs = 1000;
     function detail(e) {
       if (e.type === "token_transfer") return e.amount + "  " + (e.source || "").slice(0, 8) + " -> " + (e.destination || "").slice(0, 8);
       if (e.type === "program_ix") return e.instruction + "  " + (e.signature || "").slice(0, 12);
       if (e.type === "gap") return e.from_slot + ".." + e.to_slot;
       if (e.type === "idl_drift") return e.severity + "  " + e.summary;
+      if (e.type === "lagged") return e.skipped + " events skipped (client too slow); use /events to resync";
       if (e.type === "slot") return "";
       return JSON.stringify(e);
+    }
+    function cell(text, className) {
+      const td = document.createElement("td");
+      // textContent, not innerHTML: IDL names come from on-chain data.
+      td.textContent = text == null ? "" : String(text);
+      if (className) td.className = className;
+      return td;
     }
     function add(e) {
       n += 1;
@@ -51,15 +63,25 @@
       if (e.slot) slotEl.textContent = e.slot;
       const tr = document.createElement("tr");
       const kind = e.type || "";
-      tr.innerHTML = "<td>" + (e.slot || "") + "</td><td class='kind " + kind + "'>" + kind + "</td><td>" + (e.program_name || e.program || e.program_id || "") + "</td><td>" + detail(e) + "</td>";
+      tr.append(
+        cell(e.slot || ""),
+        cell(kind, "kind " + kind),
+        cell(e.program_name || e.program || e.program_id || ""),
+        cell(detail(e))
+      );
       rows.prepend(tr);
       while (rows.children.length > 200) rows.removeChild(rows.lastChild);
     }
     function connect() {
       const proto = location.protocol === "https:" ? "wss" : "ws";
-      const ws = new WebSocket(proto + "://" + location.host + "/stream");
-      ws.onopen = () => { wsEl.textContent = "live"; };
-      ws.onclose = () => { wsEl.textContent = "reconnect"; setTimeout(connect, 1000); };
+      const url = proto + "://" + location.host + "/stream";
+      const ws = apiKey ? new WebSocket(url, ["index-key", apiKey]) : new WebSocket(url);
+      ws.onopen = () => { wsEl.textContent = "live"; retryMs = 1000; };
+      ws.onclose = () => {
+        wsEl.textContent = "reconnect";
+        setTimeout(connect, retryMs);
+        retryMs = Math.min(retryMs * 2, 30000);
+      };
       ws.onerror = () => { wsEl.textContent = "error"; };
       ws.onmessage = (m) => { try { add(JSON.parse(m.data)); } catch (e) {} };
     }

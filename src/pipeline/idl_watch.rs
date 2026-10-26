@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -6,7 +5,7 @@ use idl_drift::{diff, Severity};
 use tokio::time::sleep;
 use tracing::{info, warn};
 
-use super::idl::{install_idl, IdlRouter};
+use super::idl::{find_idl_file, install_idl, IdlRouter};
 use super::idl_fetch::fetch_idl_json;
 
 pub struct WatchConfig {
@@ -16,6 +15,13 @@ pub struct WatchConfig {
     pub force_on_breaking: bool,
 }
 
+/// Shortest poll interval. Each poll sends one RPC call per program.
+const MIN_INTERVAL_SECS: u64 = 10;
+
+fn poll_interval(secs: u64) -> Duration {
+    Duration::from_secs(secs.max(MIN_INTERVAL_SECS))
+}
+
 pub async fn watch(cfg: WatchConfig) -> Result<()> {
     let router = IdlRouter::from_dir(&cfg.idl_dir)?;
     let program_ids = router.program_ids();
@@ -23,9 +29,10 @@ pub async fn watch(cfg: WatchConfig) -> Result<()> {
         anyhow::bail!("no IDLs in {}", cfg.idl_dir.display());
     }
 
+    let interval = poll_interval(cfg.interval_secs);
     info!(
         programs = program_ids.len(),
-        interval_secs = cfg.interval_secs,
+        interval_secs = interval.as_secs(),
         "starting IDL watch"
     );
 
@@ -35,13 +42,18 @@ pub async fn watch(cfg: WatchConfig) -> Result<()> {
                 warn!(program_id, error = %err, "idl watch check failed");
             }
         }
-        sleep(Duration::from_secs(cfg.interval_secs)).await;
+        sleep(interval).await;
     }
 }
 
 async fn check_one(cfg: &WatchConfig, program_id: &str) -> Result<()> {
     let fresh = fetch_idl_json(&cfg.rpc_url, program_id).await?;
-    let baseline_path = find_idl_file(&cfg.idl_dir, program_id)?;
+    let baseline_path = find_idl_file(&cfg.idl_dir, program_id)?.ok_or_else(|| {
+        anyhow::anyhow!(
+            "no IDL file for program {program_id} in {}",
+            cfg.idl_dir.display()
+        )
+    })?;
     let baseline = std::fs::read_to_string(&baseline_path)?;
     let old = idl_drift::model::Idl::from_json(&baseline)?;
     let new = idl_drift::model::Idl::from_json(&fresh)?;
@@ -84,18 +96,13 @@ async fn check_one(cfg: &WatchConfig, program_id: &str) -> Result<()> {
     Ok(())
 }
 
-fn find_idl_file(idl_dir: &Path, program_id: &str) -> Result<std::path::PathBuf> {
-    for entry in std::fs::read_dir(idl_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
-        let src = std::fs::read_to_string(&path)?;
-        let idl = idl_drift::model::Idl::from_json(&src)?;
-        if idl.address == program_id {
-            return Ok(path);
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn poll_interval_has_a_floor() {
+        assert_eq!(poll_interval(0), Duration::from_secs(10));
+        assert_eq!(poll_interval(300), Duration::from_secs(300));
     }
-    anyhow::bail!("no IDL file for program {program_id} in {}", idl_dir.display())
 }

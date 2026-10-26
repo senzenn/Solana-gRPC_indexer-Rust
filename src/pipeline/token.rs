@@ -18,7 +18,8 @@ pub fn parse_token_ix(ix: &RawInstruction) -> Option<IndexEvent> {
             Some(IndexEvent::TokenTransfer {
                 slot: ix.slot,
                 signature: ix.signature.clone(),
-                ix_index: ix.ix_index,
+                ix_index: ix.ix_index(),
+                ix_path: ix.ix_path(),
                 program: ix.program_id.clone(),
                 source: ix.accounts[0].clone(),
                 destination: ix.accounts[1].clone(),
@@ -37,7 +38,8 @@ pub fn parse_token_ix(ix: &RawInstruction) -> Option<IndexEvent> {
             Some(IndexEvent::TokenTransfer {
                 slot: ix.slot,
                 signature: ix.signature.clone(),
-                ix_index: ix.ix_index,
+                ix_index: ix.ix_index(),
+                ix_path: ix.ix_path(),
                 program: ix.program_id.clone(),
                 source: ix.accounts[0].clone(),
                 destination: ix.accounts[2].clone(),
@@ -59,10 +61,11 @@ mod tests {
         RawInstruction {
             slot: 42,
             signature: "sig".into(),
-            ix_index: 1,
+            path: crate::pipeline::ix_path::IxPath::root(1),
             program_id: program.into(),
             accounts: accounts.iter().map(|s| (*s).to_string()).collect(),
             data,
+            failed: false,
         }
     }
 

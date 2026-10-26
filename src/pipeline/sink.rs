@@ -1,8 +1,8 @@
 use std::time::Duration;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
-use reqwest::Client;
+use reqwest::{redirect, Client, Url};
 use tracing::warn;
 
 use super::config_file::SinkConfig;
@@ -66,7 +66,7 @@ impl SinkFanout {
     pub async fn send(&self, event: &IndexEvent) -> Result<()> {
         for sink in &self.sinks {
             if let Err(err) = sink.send(event).await {
-                warn!(error = %err, "event sink failed");
+                warn!(error = %format_args!("{err:#}"), "event sink failed");
             }
         }
         Ok(())
@@ -97,18 +97,50 @@ impl EventSink for StdoutSink {
     }
 }
 
+const WEBHOOK_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+const WEBHOOK_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+const WEBHOOK_ATTEMPTS: u32 = 3;
+
+/// A slow endpoint must not hold delivery, and a redirect must not resend the body to another host.
+fn webhook_client() -> Result<Client> {
+    Client::builder()
+        .connect_timeout(WEBHOOK_CONNECT_TIMEOUT)
+        .timeout(WEBHOOK_REQUEST_TIMEOUT)
+        .redirect(redirect::Policy::none())
+        .build()
+        .context("build webhook http client")
+}
+
 struct WebhookSink {
-    url: String,
+    url: Url,
+    /// Scheme and host only, because the path or query can hold a secret token.
+    label: String,
     filter: SinkFilter,
     client: Client,
 }
 
+fn webhook_url(cfg: &SinkConfig) -> Result<Url> {
+    let url = cfg.url.as_deref().context("webhook sink requires url")?;
+    // The parse error text does not contain the URL.
+    let url = Url::parse(url).map_err(|err| anyhow!("invalid webhook url: {err}"))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        bail!("webhook url must use http or https");
+    }
+    Ok(url)
+}
+
 impl WebhookSink {
-    fn new(url: String, cfg: &SinkConfig) -> Self {
+    fn new(url: Url, cfg: &SinkConfig, client: Client) -> Self {
+        let host = url.host_str().unwrap_or_default();
+        let label = match url.port() {
+            Some(port) => format!("{}://{host}:{port}", url.scheme()),
+            None => format!("{}://{host}", url.scheme()),
+        };
         Self {
             url,
+            label,
             filter: SinkFilter::from(cfg),
-            client: Client::new(),
+            client,
         }
     }
 
@@ -116,33 +148,32 @@ impl WebhookSink {
         let mut delay = Duration::from_millis(250);
         let mut last_err = None;
 
-        for attempt in 0..3 {
+        for attempt in 1..=WEBHOOK_ATTEMPTS {
             match self
                 .client
-                .post(&self.url)
+                .post(self.url.clone())
                 .json(event)
                 .send()
                 .await
             {
                 Ok(resp) if resp.status().is_success() => return Ok(()),
                 Ok(resp) => {
-                    last_err = Some(anyhow::anyhow!(
-                        "webhook returned HTTP {}",
-                        resp.status()
-                    ));
+                    last_err = Some(anyhow!("webhook returned HTTP {}", resp.status()));
                 }
                 Err(err) => {
-                    last_err = Some(err.into());
+                    // reqwest error text contains the full URL.
+                    last_err = Some(err.without_url().into());
                 }
             }
 
-            if attempt < 2 {
+            if attempt < WEBHOOK_ATTEMPTS {
                 tokio::time::sleep(delay).await;
                 delay *= 2;
             }
         }
 
-        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("webhook failed")))
+        let err = last_err.unwrap_or_else(|| anyhow!("webhook failed"));
+        Err(err.context(format!("webhook {}", self.label)))
     }
 }
 
@@ -156,23 +187,48 @@ impl EventSink for WebhookSink {
     }
 }
 
-pub fn build_sinks(configs: &[SinkConfig]) -> Result<SinkFanout> {
-    let mut sinks: Vec<Box<dyn EventSink + Send + Sync>> = Vec::new();
-    for cfg in configs {
-        match cfg.kind.as_str() {
-            "stdout" => sinks.push(Box::new(StdoutSink::new(cfg))),
-            "webhook" => {
-                let url = cfg
-                    .url
-                    .as_ref()
-                    .context("webhook sink requires url")?
-                    .clone();
-                sinks.push(Box::new(WebhookSink::new(url, cfg)));
-            }
-            other => bail!("unknown sink kind: {other}"),
-        }
+/// The error names every bad entry.
+pub fn validate_sinks(configs: &[SinkConfig]) -> Result<()> {
+    let errors: Vec<String> = configs
+        .iter()
+        .enumerate()
+        .filter_map(|(index, cfg)| check_sink(cfg).err().map(|err| format!("sinks[{index}]: {err}")))
+        .collect();
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        bail!("{}", errors.join("; "))
     }
+}
+
+fn check_sink(cfg: &SinkConfig) -> Result<()> {
+    match cfg.kind.as_str() {
+        "stdout" => Ok(()),
+        "webhook" => webhook_url(cfg).map(|_| ()),
+        other => bail!("unknown sink kind: {other}"),
+    }
+}
+
+/// A bad entry stops startup, so a config mistake is never silently dropped.
+pub fn build_sinks(configs: &[SinkConfig]) -> Result<SinkFanout> {
+    validate_sinks(configs)?;
+    if configs.is_empty() {
+        return Ok(SinkFanout::new(Vec::new()));
+    }
+    let client = webhook_client()?;
+    let sinks = configs
+        .iter()
+        .map(|cfg| build_sink(cfg, &client))
+        .collect::<Result<Vec<_>>>()?;
     Ok(SinkFanout::new(sinks))
+}
+
+fn build_sink(cfg: &SinkConfig, client: &Client) -> Result<Box<dyn EventSink + Send + Sync>> {
+    match cfg.kind.as_str() {
+        "stdout" => Ok(Box::new(StdoutSink::new(cfg))),
+        "webhook" => Ok(Box::new(WebhookSink::new(webhook_url(cfg)?, cfg, client.clone()))),
+        other => bail!("unknown sink kind: {other}"),
+    }
 }
 
 #[cfg(test)]
@@ -185,6 +241,7 @@ mod tests {
             slot: 1,
             signature: "sig".into(),
             ix_index: 0,
+            ix_path: "0".into(),
             program: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".into(),
             source: "a".into(),
             destination: "b".into(),
@@ -200,12 +257,14 @@ mod tests {
             slot: 2,
             signature: "sig2".into(),
             ix_index: 0,
+            ix_path: "0".into(),
             program_id: "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P".into(),
             program_name: "pump".into(),
             instruction: "buy".into(),
             accounts: vec![],
             args: None,
             named_accounts: None,
+            failed: false,
         }
     }
 
@@ -268,5 +327,82 @@ mod tests {
             instructions: Some(vec!["sell".into()]),
         };
         assert!(!matches_filter(&program_ix_event(), &filter));
+    }
+
+    fn sink_config(value: serde_json::Value) -> SinkConfig {
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[tokio::test]
+    async fn build_sinks_rejects_and_names_every_bad_entry() {
+        let configs = [
+            sink_config(serde_json::json!({ "kind": "stdout" })),
+            sink_config(serde_json::json!({ "kind": "bogus" })),
+            sink_config(serde_json::json!({ "kind": "webhook" })),
+            sink_config(serde_json::json!({ "kind": "webhook", "url": "not a url" })),
+            sink_config(serde_json::json!({ "kind": "webhook", "url": "ftp://example.com/x" })),
+            sink_config(serde_json::json!({ "kind": "webhook", "url": "https://example.com/x" })),
+        ];
+        let err = build_sinks(&configs).err().unwrap().to_string();
+        for index in 1..=4 {
+            assert!(err.contains(&format!("sinks[{index}]")), "{err}");
+        }
+        assert!(!err.contains("sinks[0]") && !err.contains("sinks[5]"), "{err}");
+
+        let valid = [configs[0].clone(), configs[5].clone()];
+        assert_eq!(build_sinks(&valid).unwrap().sinks.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn webhook_error_hides_url_secret() {
+        // Bind then drop, so the port refuses connections.
+        let addr = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        let cfg = sink_config(serde_json::json!({
+            "kind": "webhook",
+            "url": format!("http://{addr}/hook/secret-token?key=hunter2"),
+        }));
+        let sink = WebhookSink::new(webhook_url(&cfg).unwrap(), &cfg, webhook_client().unwrap());
+        let err = sink.send(&token_transfer_event()).await.unwrap_err();
+        let text = format!("{err:#}");
+        assert!(!text.contains("secret-token") && !text.contains("hunter2"), "{text}");
+        assert!(text.contains("127.0.0.1"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn webhook_does_not_follow_redirects() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let followed = Arc::new(AtomicUsize::new(0));
+        let hits = followed.clone();
+        let app = axum::Router::new()
+            .route(
+                "/hook",
+                axum::routing::post(|| async { axum::response::Redirect::temporary("/ok") }),
+            )
+            .route(
+                "/ok",
+                axum::routing::post(move || {
+                    hits.fetch_add(1, Ordering::SeqCst);
+                    async { "ok" }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+
+        let cfg = sink_config(serde_json::json!({
+            "kind": "webhook",
+            "url": format!("http://{addr}/hook"),
+        }));
+        let sink = WebhookSink::new(webhook_url(&cfg).unwrap(), &cfg, webhook_client().unwrap());
+        let err = sink.send(&token_transfer_event()).await.unwrap_err();
+        assert!(format!("{err:#}").contains("307"), "{err:#}");
+        assert_eq!(followed.load(Ordering::SeqCst), 0);
     }
 }

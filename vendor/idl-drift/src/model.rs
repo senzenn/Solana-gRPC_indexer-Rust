@@ -26,6 +26,7 @@
 //! and one that writes it explicitly deserialize to *identical* values.
 
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
 pub type Discriminator = Vec<u8>;
@@ -226,6 +227,11 @@ pub enum Type {
     I64,
     U128,
     I128,
+    /// IEEE-754 floats. Borsh encodes them little-endian, same as the
+    /// integers. Marginfi and other pre-0.30 Anchor programs use `f64` in
+    /// instruction args; without these they fail to parse at all.
+    F32,
+    F64,
     Bytes,
     String,
     Pubkey,
@@ -310,28 +316,27 @@ fn normalize_legacy_anchor(value: &mut serde_json::Value) {
         return;
     };
 
-    if !obj.contains_key("metadata") && (obj.contains_key("name") || obj.contains_key("version")) {
-        let name = obj
-            .get("name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown")
-            .to_string();
-        let version = obj
-            .get("version")
-            .and_then(|v| v.as_str())
-            .unwrap_or("0.0.0")
-            .to_string();
-        obj.insert(
-            "metadata".into(),
-            serde_json::json!({
-                "name": name,
-                "version": version,
-                "spec": "legacy-anchor",
-            }),
-        );
-        // Legacy Anchor IDL often omits address; allow empty so fetch+stamp works.
-        if !obj.contains_key("address") {
-            obj.insert("address".into(), serde_json::Value::String(String::new()));
+    promote_legacy_metadata(obj);
+
+    if let Some(instructions) = obj.get_mut("instructions").and_then(|i| i.as_array_mut()) {
+        for ix in instructions.iter_mut() {
+            let Some(ixobj) = ix.as_object_mut() else {
+                continue;
+            };
+            // Pre-0.30 Anchor IDLs carry no discriminator; Anchor derives it from
+            // the Rust fn name, which the IDL stores camelCased.
+            let derived = ixobj
+                .get("name")
+                .and_then(|v| v.as_str())
+                .map(anchor_instruction_discriminator);
+            if let Some(bytes) = derived {
+                let entry = ixobj
+                    .entry("discriminator".to_string())
+                    .or_insert_with(|| serde_json::json!([]));
+                if entry.as_array().is_none_or(Vec::is_empty) {
+                    *entry = serde_json::json!(bytes);
+                }
+            }
         }
     }
 
@@ -407,6 +412,75 @@ fn normalize_legacy_anchor(value: &mut serde_json::Value) {
     normalize_tuple_struct_fields(value);
 }
 
+/// Build Solana IDL-spec `metadata` from legacy top-level `name`/`version`.
+///
+/// `anchor deploy` before 0.30 writes `"metadata": {"address": "..."}` with no
+/// name, so treat a `metadata` without `name` as legacy too, and use its
+/// `address` when the top level has none.
+fn promote_legacy_metadata(obj: &mut serde_json::Map<String, serde_json::Value>) {
+    let legacy_meta = obj.get("metadata").is_none_or(|m| m.get("name").is_none());
+    if !legacy_meta || !(obj.contains_key("name") || obj.contains_key("version")) {
+        return;
+    }
+    let text = |key: &str, default: &str| {
+        obj.get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or(default)
+            .to_string()
+    };
+    let name = text("name", "unknown");
+    let version = text("version", "0.0.0");
+    let meta_address = obj
+        .get("metadata")
+        .and_then(|m| m.get("address"))
+        .and_then(|a| a.as_str())
+        .unwrap_or_default()
+        .to_string();
+    obj.insert(
+        "metadata".into(),
+        serde_json::json!({
+            "name": name,
+            "version": version,
+            "spec": "legacy-anchor",
+        }),
+    );
+    // Legacy Anchor IDL often omits address; allow empty so fetch+stamp works.
+    if !obj.contains_key("address") {
+        obj.insert("address".into(), serde_json::Value::String(meta_address));
+    }
+}
+
+/// Anchor's instruction discriminator: `sha256("global:<snake_case_name>")[..8]`.
+///
+/// Legacy IDLs store the camelCased name, so convert back before hashing.
+/// Verified byte-for-byte against 241 Drift v2 instructions.
+fn anchor_instruction_discriminator(name: &str) -> Vec<u8> {
+    let mut hasher = Sha256::new();
+    hasher.update(format!("global:{}", to_snake_case(name)).as_bytes());
+    hasher.finalize()[..8].to_vec()
+}
+
+/// `placePerpOrder` → `place_perp_order`, `initializeSignedMsgWsDelegates` →
+/// `initialize_signed_msg_ws_delegates`. Already-snake input is unchanged.
+fn to_snake_case(name: &str) -> String {
+    let chars: Vec<char> = name.chars().collect();
+    let mut out = String::with_capacity(name.len() + 4);
+    for (i, &c) in chars.iter().enumerate() {
+        if c.is_ascii_uppercase() && i > 0 {
+            let prev = chars[i - 1];
+            let next_is_lower = chars.get(i + 1).is_some_and(char::is_ascii_lowercase);
+            if prev.is_ascii_lowercase()
+                || prev.is_ascii_digit()
+                || (prev.is_ascii_uppercase() && next_is_lower)
+            {
+                out.push('_');
+            }
+        }
+        out.push(c.to_ascii_lowercase());
+    }
+    out
+}
+
 /// Anchor sometimes emits newtype/tuple structs as `"fields": ["bool"]`
 /// (bare type strings). Our model expects named `Field`s — invent `_0`, `_1`, …
 fn normalize_tuple_struct_fields(value: &mut serde_json::Value) {
@@ -474,5 +548,69 @@ fn rewrite_legacy_keys(value: &mut serde_json::Value) {
             *s = "pubkey".into();
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod legacy_anchor_tests {
+    use super::*;
+
+    /// Ground truth: Drift v2's on-chain discriminators, as hardcoded in
+    /// carbon's `drift-v2-decoder`.
+    const DRIFT_INITIALIZE_USER: [u8; 8] = [111, 17, 185, 250, 60, 122, 38, 254];
+    const DRIFT_PLACE_PERP_ORDER: [u8; 8] = [69, 161, 93, 202, 120, 126, 76, 185];
+
+    #[test]
+    fn derives_instruction_discriminators_for_legacy_anchor() {
+        let src = r#"{
+            "version": "2.0.0",
+            "name": "drift",
+            "instructions": [
+                {"name": "initializeUser", "accounts": [], "args": []},
+                {"name": "placePerpOrder", "accounts": [], "args": []}
+            ]
+        }"#;
+        let idl = Idl::from_json(src).unwrap();
+        assert_eq!(idl.instructions[0].discriminator, DRIFT_INITIALIZE_USER);
+        assert_eq!(idl.instructions[1].discriminator, DRIFT_PLACE_PERP_ORDER);
+    }
+
+    #[test]
+    fn keeps_explicit_discriminator() {
+        let src = r#"{
+            "version": "0.1.0",
+            "name": "demo",
+            "instructions": [
+                {"name": "initializeUser", "discriminator": [1,2,3,4,5,6,7,8],
+                 "accounts": [], "args": []}
+            ]
+        }"#;
+        let idl = Idl::from_json(src).unwrap();
+        assert_eq!(idl.instructions[0].discriminator, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn legacy_metadata_with_only_address_parses() {
+        let src = r#"{
+            "version": "0.1.0",
+            "name": "legacy",
+            "instructions": [],
+            "metadata": {"address": "dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH"}
+        }"#;
+        let idl = Idl::from_json(src).unwrap();
+        assert_eq!(idl.metadata.name, "legacy");
+        assert_eq!(idl.address, "dRiftyHA39MWEi3m9aunc5MzRF1JYuBsbn6VPcn33UH");
+    }
+
+    #[test]
+    fn snake_case_handles_acronyms_and_digits() {
+        assert_eq!(to_snake_case("placePerpOrder"), "place_perp_order");
+        assert_eq!(
+            to_snake_case("initializeSignedMsgWsDelegates"),
+            "initialize_signed_msg_ws_delegates"
+        );
+        assert_eq!(to_snake_case("swapV2"), "swap_v2");
+        assert_eq!(to_snake_case("initialize2"), "initialize2");
+        assert_eq!(to_snake_case("already_snake"), "already_snake");
     }
 }

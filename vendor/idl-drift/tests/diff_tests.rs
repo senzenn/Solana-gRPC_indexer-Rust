@@ -938,3 +938,170 @@ fn limit_order_idls_have_no_unexpected_generics() {
         swap.ty
     );
 }
+
+#[test]
+fn base16_non_ascii_does_not_panic() {
+    assert_eq!(decode_encoded_bytes("base16", "\u{e9}a"), Vec::<u8>::new());
+    assert_eq!(decode_encoded_bytes("base16", "0aff"), vec![0x0a, 0xff]);
+}
+
+/// Enum `Action` reached from an ix arg, plus `Wrap` (an alias) reached the same way.
+fn enum_and_alias_idl(variant_fields: &str, params_amount: &str, inner_x: &str) -> Idl {
+    parse(&format!(
+        r#"{{
+      "address":"A","metadata":{{"name":"e","version":"1","spec":"0.1.0"}},
+      "instructions":[{{"name":"act","discriminator":[1],"accounts":[],
+        "args":[{{"name":"action","type":{{"defined":{{"name":"Action"}}}}}},
+                {{"name":"wrap","type":{{"defined":{{"name":"Wrap"}}}}}}]}}],
+      "types":[
+        {{"name":"Action","type":{{"kind":"enum","variants":[
+          {{"name":"Deposit","fields":{variant_fields}}},
+          {{"name":"Swap","fields":[{{"defined":{{"name":"SwapParams"}}}}]}}]}}}},
+        {{"name":"SwapParams","type":{{"kind":"struct","fields":[{{"name":"amount","type":"{params_amount}"}}]}}}},
+        {{"name":"Wrap","type":{{"kind":"type","alias":{{"defined":{{"name":"Inner"}}}}}}}},
+        {{"name":"Inner","type":{{"kind":"struct","fields":[{{"name":"x","type":"{inner_x}"}}]}}}}]
+    }}"#
+    ))
+}
+
+#[test]
+fn enum_variant_payload_change_is_breaking() {
+    let old = enum_and_alias_idl(r#"[{"name":"amount","type":"u64"}]"#, "u64", "u8");
+    let new = enum_and_alias_idl(r#"[{"name":"amount","type":"u128"}]"#, "u64", "u8");
+    let r = diff(&old, &new);
+    assert!(
+        r.changes
+            .iter()
+            .any(|c| c.severity == Severity::Breaking && c.message.contains("payload")),
+        "{:?}",
+        r.changes
+    );
+}
+
+#[test]
+fn types_reached_through_enum_variant_or_alias_are_reachable() {
+    let base = enum_and_alias_idl("[]", "u64", "u8");
+    let swap_widened = enum_and_alias_idl("[]", "u128", "u8");
+    let inner_widened = enum_and_alias_idl("[]", "u64", "u16");
+    for (label, new) in [("enum variant", swap_widened), ("alias", inner_widened)] {
+        let r = diff(&base, &new);
+        assert!(r.has_breaking(), "{label}: {:?}", r.changes);
+    }
+}
+
+#[test]
+fn coverage_flags_generic_array_length_and_missing_type() {
+    use idl_drift::coverage;
+    let idl = parse(
+        r#"{
+      "address":"A","metadata":{"name":"g","version":"1","spec":"0.1.0"},
+      "instructions":[{"name":"ix","discriminator":[1],"accounts":[],
+        "args":[{"name":"buf","type":{"array":["u8","N"]}},
+                {"name":"cfg","type":{"defined":{"name":"Missing"}}}]}]
+    }"#,
+    );
+    let kinds: Vec<String> = coverage(&idl)
+        .unmapped
+        .into_iter()
+        .map(|u| u.kind)
+        .collect();
+    assert_eq!(
+        kinds,
+        vec!["arrayLen:N".to_string(), "undefined:Missing".to_string()]
+    );
+}
+
+/// Codama root with one `ix` instruction: a numeric field discriminator of
+/// the given format/value, then one argument of the given type.
+fn codama_ix(disc_format: &str, disc_value: u64, arg_type: &str) -> Idl {
+    parse(&format!(
+        r#"{{
+      "kind":"rootNode","standard":"codama","version":"1.5.1","additionalPrograms":[],
+      "program":{{"kind":"programNode","name":"p","publicKey":"11111111111111111111111111111111",
+        "version":"0.1.0","accounts":[],"definedTypes":[],"errors":[],"pdas":[],
+        "instructions":[{{"kind":"instructionNode","name":"ix","accounts":[],
+          "arguments":[
+            {{"kind":"instructionArgumentNode","name":"discriminator","defaultValueStrategy":"omitted",
+              "type":{{"kind":"numberTypeNode","format":"{disc_format}","endian":"le"}},
+              "defaultValue":{{"kind":"numberValueNode","number":{disc_value}}}}},
+            {{"kind":"instructionArgumentNode","name":"x","type":{arg_type}}}],
+          "discriminators":[{{"kind":"fieldDiscriminatorNode","name":"discriminator","offset":0}}]}}]}}
+    }}"#
+    ))
+}
+
+const U64_TYPE: &str = r#"{"kind":"numberTypeNode","format":"u64","endian":"le"}"#;
+
+#[test]
+fn codama_numeric_discriminator_keeps_its_width() {
+    assert_eq!(
+        codama_ix("u32", 2, U64_TYPE).instructions[0].discriminator,
+        vec![2, 0, 0, 0]
+    );
+    assert_eq!(
+        codama_ix("u16", 300, U64_TYPE).instructions[0].discriminator,
+        vec![44, 1]
+    );
+    assert_eq!(
+        codama_ix("u8", 3, U64_TYPE).instructions[0].discriminator,
+        vec![3]
+    );
+    assert!(codama_ix("u8", 300, U64_TYPE).instructions[0]
+        .discriminator
+        .is_empty());
+}
+
+#[test]
+fn codama_non_borsh_prefixes_stay_unmapped() {
+    let count = |prefix: &str| {
+        format!(
+            r#"{{"kind":"arrayTypeNode","item":{U64_TYPE},"count":{{"kind":"prefixedCountNode","prefix":{{"kind":"numberTypeNode","format":"{prefix}","endian":"le"}}}}}}"#
+        )
+    };
+    let arg = |ty: &str| codama_ix("u8", 1, ty).instructions[0].args[0].ty.clone();
+
+    assert_eq!(arg(&count("u32")), Type::Vec(Box::new(Type::U64)));
+    assert_eq!(arg(&count("u8")), Type::Generic("prefixedCountNode".into()));
+    assert_eq!(
+        arg(&format!(
+            r#"{{"kind":"arrayTypeNode","item":{U64_TYPE},"count":{{"kind":"remainderCountNode"}}}}"#
+        )),
+        Type::Generic("remainderCountNode".into())
+    );
+    assert_eq!(
+        arg(r#"{"kind":"zeroableOptionTypeNode","item":{"kind":"publicKeyTypeNode"}}"#),
+        Type::Generic("zeroableOptionTypeNode".into())
+    );
+    assert_eq!(
+        arg(
+            r#"{"kind":"sizePrefixTypeNode","type":{"kind":"stringTypeNode","encoding":"utf8"},"prefix":{"kind":"numberTypeNode","format":"u8","endian":"le"}}"#
+        ),
+        Type::Generic("sizePrefixTypeNode".into())
+    );
+}
+
+#[test]
+fn long_alias_chain_reachability_is_linear() {
+    // E -> T0 -> T1 -> ... -> T19999 -> u64. The old fixpoint loop rescanned
+    // the whole set once per new type.
+    const N: usize = 20_000;
+    let types: Vec<TypeDef> = (0..N)
+        .map(|i| TypeDef {
+            name: format!("T{i}"),
+            serialization: "borsh".into(),
+            ty: TypeDefTy::Type {
+                alias: if i + 1 < N {
+                    defined(&format!("T{}", i + 1))
+                } else {
+                    Type::U64
+                },
+            },
+        })
+        .chain([typedef_struct("E", vec![field("head", defined("T0"))])])
+        .collect();
+    let idl = idl_with(vec![event_named("E")], types);
+    let start = std::time::Instant::now();
+    let reached = idl_drift::diff::reachable_types(&idl);
+    assert_eq!(reached.len(), N + 1);
+    assert!(start.elapsed() < std::time::Duration::from_secs(5));
+}

@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use super::idl::{install_idl, IdlRouter};
+use super::idl::{install_idl, printable, IdlRouter};
 use super::idl_fetch::fetch_idl_json;
 
 pub fn add_idl(idl_dir: &Path, idl_path: &Path, force: bool) -> Result<()> {
@@ -11,16 +11,19 @@ pub fn add_idl(idl_dir: &Path, idl_path: &Path, force: bool) -> Result<()> {
     let (dest, report) = install_idl(idl_dir, &src, force)?;
     println!(
         "installed {} ({}) -> {}",
-        report.name,
-        report.program_id,
-        dest.display()
+        printable(&report.name),
+        printable(&report.program_id),
+        printable(&dest.display().to_string())
     );
     println!("instructions: {}", report.instruction_count);
     if !report.dangerous.is_empty() {
-        println!("dangerous: {}", report.dangerous.join("; "));
+        println!("dangerous: {}", printable(&report.dangerous.join("; ")));
     }
     if !report.breaking.is_empty() {
-        println!("breaking (forced): {}", report.breaking.join("; "));
+        println!(
+            "breaking (forced): {}",
+            printable(&report.breaking.join("; "))
+        );
     }
     if report.unmapped > 0 {
         println!("unmapped Generic fields: {}", report.unmapped);
@@ -36,7 +39,7 @@ pub fn list_idls(idl_dir: &Path) -> Result<()> {
         return Ok(());
     }
     for id in ids {
-        println!("{id}");
+        println!("{}", printable(&id));
     }
     Ok(())
 }
@@ -50,7 +53,7 @@ pub fn diff_idls(old: &PathBuf, new: &PathBuf) -> Result<()> {
     let (b, d, a, c) = report.counts();
     println!("breaking={b} dangerous={d} additive={a} cosmetic={c}");
     for change in &report.changes {
-        println!("{:?}  {}", change.severity, change.message);
+        println!("{:?}  {}", change.severity, printable(&change.message));
     }
     if report.has_breaking() {
         anyhow::bail!("breaking IDL drift");
@@ -68,7 +71,9 @@ pub async fn fetch_idl(
     let (dest, report) = install_idl(idl_dir, &json, force)?;
     println!(
         "fetched {} ({}) -> {}",
-        report.name, report.program_id, dest.display()
+        printable(&report.name),
+        printable(&report.program_id),
+        printable(&dest.display().to_string())
     );
     println!("instructions: {}", report.instruction_count);
     Ok(())

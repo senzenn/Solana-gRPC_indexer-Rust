@@ -1,13 +1,19 @@
 services:
-  # Read-only HTTP/WS over SQLite — no geyser credentials required.
+  # Read-only HTTP/WS over SQLite; no geyser credentials required.
+  # Start with: docker compose --profile demo up --build demo
   demo:
+    profiles: ["demo"]
     build:
       context: .
       dockerfile: Dockerfile
+    init: true
+    # Host loopback only; 8081 so demo and indexer can run together.
+    # No TLS: for a public address, set INDEX_API_KEYS and use a TLS reverse proxy.
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8081:8080"
     environment:
       DATABASE_URL: sqlite:/data/index.db
+      INDEX_API_KEYS: ${INDEX_API_KEYS:-}
     volumes:
       - index-data:/data
     command:
@@ -17,33 +23,30 @@ services:
       - --bind
       - 0.0.0.0:8080
 
-  # Live geyser ingest — requires .env with YELLOWSTONE_ENDPOINT (and optional auth token).
+  # Live geyser ingest. Requires .env with YELLOWSTONE_ENDPOINT (and optional auth token).
   indexer:
     build:
       context: .
       dockerfile: Dockerfile
+    init: true
+    # Host loopback only. The server has no TLS: before you publish on a public address,
+    # set INDEX_API_KEYS and put a TLS reverse proxy in front that sets X-Forwarded-Host.
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
+    # The binary reads YELLOWSTONE_ENDPOINT, YELLOWSTONE_AUTH_TOKEN, SOLANA_RPC_URL and
+    # INDEX_API_KEYS from this env. Do not put secrets in `command`: argv is visible in ps.
     env_file:
       - .env
     environment:
-      YELLOWSTONE_ENDPOINT: ${YELLOWSTONE_ENDPOINT:-}
-      YELLOWSTONE_AUTH_TOKEN: ${YELLOWSTONE_AUTH_TOKEN:-}
       DATABASE_URL: sqlite:/data/index.db
     volumes:
       - index-data:/data
       - ./idls:/app/idls
       # Optional: copy index.example.yaml to index.yaml, set geyser fields, then uncomment:
       # - ./index.yaml:/app/index.yaml:ro
-    # Default: CLI flags from .env (see .env.example).
-    # With index.yaml mounted above, replace command with:
-    #   run --config /app/index.yaml --db sqlite:/data/index.db
+    # With index.yaml mounted above, add `--config /app/index.yaml` to command.
     command:
       - run
-      - --endpoint
-      - ${YELLOWSTONE_ENDPOINT:?set YELLOWSTONE_ENDPOINT in .env}
-      - --auth-token
-      - ${YELLOWSTONE_AUTH_TOKEN:-}
       - --idl-dir
       - /app/idls
       - --bind

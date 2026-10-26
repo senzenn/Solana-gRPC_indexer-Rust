@@ -14,11 +14,19 @@ pub fn init() -> &'static PrometheusHandle {
         );
         describe_gauge!(
             "indexer_slot_current",
-            "Latest slot observed by the indexer"
+            "Latest confirmed slot observed by the indexer"
+        );
+        describe_gauge!(
+            "indexer_slot_finalized",
+            "Latest finalized slot committed by the indexer"
         );
         describe_gauge!(
             "indexer_lag_slots",
-            "Slots behind chain head when computable"
+            "Confirmed slot minus finalized slot"
+        );
+        describe_counter!(
+            "indexer_orphan_slots_total",
+            "Slots dropped after fork rollback or dead-slot updates"
         );
         describe_gauge!("indexer_open_gaps", "Number of unfilled slot gaps");
         describe_counter!(
@@ -28,6 +36,10 @@ pub fn init() -> &'static PrometheusHandle {
         describe_counter!(
             "indexer_geyser_errors_total",
             "Total geyser stream errors before reconnect"
+        );
+        describe_counter!(
+            "indexer_stream_lagged_events_total",
+            "Live events skipped for slow WebSocket or gRPC stream clients"
         );
 
         PrometheusBuilder::new()
@@ -45,11 +57,20 @@ pub fn record_event_stored() {
     counter!("indexer_events_total").increment(1);
 }
 
-pub fn update_live_stats(slot: u64, lag_slots: u64, open_gaps: i64) {
+pub fn update_live_stats(slot: u64, finalized_slot: u64, lag_slots: u64, open_gaps: i64) {
     init();
     gauge!("indexer_slot_current").set(slot as f64);
+    gauge!("indexer_slot_finalized").set(finalized_slot as f64);
     gauge!("indexer_lag_slots").set(lag_slots as f64);
     gauge!("indexer_open_gaps").set(open_gaps as f64);
+}
+
+pub fn record_orphans(count: u64) {
+    if count == 0 {
+        return;
+    }
+    init();
+    counter!("indexer_orphan_slots_total").increment(count);
 }
 
 pub fn record_reconnect() {
@@ -62,6 +83,11 @@ pub fn record_geyser_error() {
     counter!("indexer_geyser_errors_total").increment(1);
 }
 
+pub fn record_stream_lagged(skipped: u64) {
+    init();
+    counter!("indexer_stream_lagged_events_total").increment(skipped);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -71,14 +97,19 @@ mod tests {
         record_event_stored();
         record_reconnect();
         record_geyser_error();
-        update_live_stats(42, 3, 1);
+        update_live_stats(42, 40, 2, 1);
+        record_orphans(3);
+        record_stream_lagged(2);
 
         let body = render();
         assert!(body.contains("indexer_events_total"));
         assert!(body.contains("indexer_slot_current"));
+        assert!(body.contains("indexer_slot_finalized"));
         assert!(body.contains("indexer_lag_slots"));
         assert!(body.contains("indexer_open_gaps"));
         assert!(body.contains("indexer_geyser_reconnects_total"));
         assert!(body.contains("indexer_geyser_errors_total"));
+        assert!(body.contains("indexer_orphan_slots_total"));
+        assert!(body.contains("indexer_stream_lagged_events_total"));
     }
 }
