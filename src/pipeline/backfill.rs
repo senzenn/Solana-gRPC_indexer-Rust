@@ -329,7 +329,9 @@ fn block_config() -> RpcBlockConfig {
         transaction_details: Some(TransactionDetails::Full),
         rewards: Some(false),
         commitment: Some(CommitmentConfig::confirmed()),
-        max_supported_transaction_version: Some(0),
+        // Mainnet has v1 transactions (SIMD-0385). With a lower value the RPC
+        // rejects every block that holds one (-32015), so the gap never closes.
+        max_supported_transaction_version: Some(1),
     }
 }
 

@@ -34,6 +34,17 @@ cargo run -- probe   # reads YELLOWSTONE_ENDPOINT and YELLOWSTONE_AUTH_TOKEN fro
 Do not pass the token (or an endpoint URL that holds a key) as `--auth-token` /
 `--endpoint`: command-line arguments are visible to other users in `ps`.
 
+Richat (seen on 14.1.1) accepts `from_slot` only at `processed` commitment. The
+indexer subscribes at `confirmed`, so Richat rejects the replay
+(`from_slot rejected; resubscribing from tip`). The indexer then starts at the
+tip and records the down time as a gap. Backfill repairs the gap over `rpc_url`,
+so use a fast RPC with Richat. The public RPC repairs about 1 slot per second.
+
+Live check of an endpoint: set `YELLOWSTONE_ENDPOINT` and `YELLOWSTONE_AUTH_TOKEN`,
+then run `cargo test --release live_geyser -- --ignored --nocapture`. The test
+reads 20 confirmed slots with token transfers, then replays from 50 slots back.
+Official Yellowstone (Triton) passes. Richat fails at the replay step.
+
 `replay: auto` (default) omits `from_slot` when `SubscribeReplayInfo` is missing. The client accepts `zstd` (default) or `gzip`, sends subscribe pings every `ping_secs`, and answers server pings. Use `http://127.0.0.1:10000` for a local yellowstone/richat; `https://…` for hosted Triton/Richat. A `host:port` with no scheme means `https://` unless the host is loopback, so a remote plaintext endpoint needs an explicit `http://`.
 
 **Idempotency:** Events upsert on `(signature, ix_path, kind)`. `ix_path` is a CPI path (`0`, `0.1`, `0.1.2`), stable across geyser and RPC backfill. Replaying the same instruction updates the payload if it changed and does not insert a duplicate row.

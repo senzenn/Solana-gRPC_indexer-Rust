@@ -772,4 +772,70 @@ mod tests {
             ]
         );
     }
+
+    /// Confirmed slots and decoded event count from a real endpoint, until `slots`
+    /// confirmed slots arrive. Fails after 90s.
+    async fn live_window(cfg: IngestConfig, slots: usize) -> (Vec<u64>, usize) {
+        let (tx, mut rx) = mpsc::channel(1024);
+        let task = tokio::spawn(run_ingest(cfg, tx, Arc::new(AtomicU64::new(0))));
+        let router = IdlRouter::default();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
+        let (mut confirmed, mut events) = (Vec::new(), 0);
+        while confirmed.len() < slots {
+            let msg = tokio::time::timeout_at(deadline, rx.recv())
+                .await
+                .expect("not enough data from the endpoint in 90s")
+                .expect("ingest stopped");
+            match msg {
+                IngestMsg::Slot {
+                    slot,
+                    status: SlotCommitment::Confirmed,
+                    ..
+                } => confirmed.push(slot),
+                IngestMsg::Instructions(ixs) => {
+                    events += decode_instructions(&router, &ixs, true).len();
+                }
+                IngestMsg::GeyserError => panic!("geyser error"),
+                _ => {}
+            }
+        }
+        task.abort();
+        (confirmed, events)
+    }
+
+    // Needs a real endpoint, so it is ignored by default. Run it with
+    // YELLOWSTONE_ENDPOINT and YELLOWSTONE_AUTH_TOKEN in the env:
+    // cargo test --release live_geyser -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn live_geyser_streams_and_replays() {
+        use crate::pipeline::config_file::env_var;
+        let endpoint = env_var("YELLOWSTONE_ENDPOINT").expect("set YELLOWSTONE_ENDPOINT");
+        let cfg = |from_slot| IngestConfig {
+            endpoint: endpoint.clone(),
+            auth_token: env_var("YELLOWSTONE_AUTH_TOKEN").unwrap_or_default(),
+            from_slot,
+            track_tokens: true,
+            ..Default::default()
+        };
+
+        let (tip, events) = live_window(cfg(None), 20).await;
+        println!(
+            "tip: {} confirmed slots from {}, {events} token events",
+            tip.len(),
+            tip[0]
+        );
+        assert!(
+            events > 0,
+            "no token transfer decoded in 20 confirmed slots"
+        );
+
+        let from = tip[0] - 50;
+        let (replayed, _) = live_window(cfg(Some(from)), 5).await;
+        println!("replay from {from}: first confirmed slot {}", replayed[0]);
+        assert!(
+            replayed[0] < tip[0],
+            "server did not replay from_slot {from} (Richat replays only at processed commitment)"
+        );
+    }
 }

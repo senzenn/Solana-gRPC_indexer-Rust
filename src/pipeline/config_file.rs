@@ -10,11 +10,16 @@ use serde::Deserialize;
 #[serde(deny_unknown_fields)]
 pub struct IndexConfig {
     pub geyser: GeyserConfig,
+    #[serde(default)]
     pub store: StoreConfig,
+    #[serde(default)]
     pub serve: ServeConfig,
     /// IDL JSON file paths (one program per file).
+    #[serde(default)]
     pub programs: Vec<PathBuf>,
+    #[serde(default)]
     pub wallets: Vec<String>,
+    #[serde(default)]
     pub sinks: Vec<SinkConfig>,
     /// Solana JSON-RPC URL for backfill / gap repair.
     pub rpc_url: Option<String>,
@@ -51,7 +56,10 @@ pub enum CompressionKind {
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct GeyserConfig {
+    /// Empty here is allowed: YELLOWSTONE_ENDPOINT can set it.
+    #[serde(default)]
     pub endpoint: String,
+    #[serde(default)]
     pub auth_token: String,
     #[serde(default)]
     pub track_failed: bool,
@@ -77,13 +85,39 @@ fn default_ping_secs() -> u64 {
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct StoreConfig {
+    #[serde(default = "default_store_url")]
     pub url: String,
+}
+
+fn default_store_url() -> String {
+    "sqlite:./index.db".to_string()
+}
+
+impl Default for StoreConfig {
+    fn default() -> Self {
+        Self {
+            url: default_store_url(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ServeConfig {
+    #[serde(default = "default_bind")]
     pub bind: String,
+}
+
+fn default_bind() -> String {
+    "127.0.0.1:8080".to_string()
+}
+
+impl Default for ServeConfig {
+    fn default() -> Self {
+        Self {
+            bind: default_bind(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -188,12 +222,8 @@ pub fn default_config() -> IndexConfig {
             ping_secs: default_ping_secs(),
             compression: CompressionKind::Zstd,
         },
-        store: StoreConfig {
-            url: "sqlite:./index.db".to_string(),
-        },
-        serve: ServeConfig {
-            bind: "127.0.0.1:8080".to_string(),
-        },
+        store: StoreConfig::default(),
+        serve: ServeConfig::default(),
         programs: vec![PathBuf::from("./idls/pumpFun.json")],
         wallets: Vec::new(),
         sinks: Vec::new(),
@@ -249,6 +279,19 @@ mod tests {
         assert_eq!(cfg.geyser.ping_secs, 10);
         assert_eq!(cfg.geyser.compression, CompressionKind::Zstd);
         assert!(default_config().validate().is_err());
+    }
+
+    #[test]
+    fn optional_fields_take_documented_defaults() {
+        let cfg: IndexConfig =
+            serde_yaml::from_str("geyser:\n  endpoint: \"http://127.0.0.1:10000\"\n")
+                .expect("minimal yaml should parse");
+        let defaults = default_config();
+        assert_eq!(cfg.store, defaults.store);
+        assert_eq!(cfg.serve, defaults.serve);
+        assert_eq!(cfg.geyser.auth_token, "");
+        assert!(cfg.programs.is_empty() && cfg.wallets.is_empty() && cfg.sinks.is_empty());
+        cfg.validate().expect("minimal config is valid");
     }
 
     #[test]
