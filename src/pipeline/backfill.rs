@@ -529,7 +529,7 @@ fn ui_instruction_to_raw(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pipeline::testutil::TempDb;
+    use crate::pipeline::testutil::temp_store;
     use solana_client::rpc_request::RpcResponseErrorData;
 
     fn rpc_error(code: i64) -> ClientError {
@@ -553,12 +553,6 @@ mod tests {
             block_time: None,
             block_height: None,
         }
-    }
-
-    async fn temp_store() -> (Arc<EventStore>, TempDb) {
-        let db = TempDb::new();
-        let store = EventStore::open(&db.url).await.unwrap();
-        (Arc::new(store), db)
     }
 
     async fn open_gaps(store: &EventStore) -> Vec<(u64, u64)> {

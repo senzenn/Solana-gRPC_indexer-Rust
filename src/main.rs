@@ -11,9 +11,8 @@ use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
 
 mod pipeline;
 
-/// Loopback default: protected routes are open when no API key is set.
-const DEFAULT_BIND: &str = "127.0.0.1:8080";
-const DEFAULT_DB: &str = "sqlite:./index.db";
+use pipeline::config_file::{DEFAULT_BIND, DEFAULT_PING_SECS, DEFAULT_STORE_URL};
+
 const DEFAULT_RPC_URL: &str = "https://api.mainnet-beta.solana.com";
 const DEFAULT_IDL_DIR: &str = "./idls";
 /// Under --tui the terminal belongs to the TUI, so logs go to this file.
@@ -112,9 +111,9 @@ enum Commands {
         auth_token: String,
     },
 
-    /// Serve stored events only (no geyser) — demo / read-only mode
+    /// Serve stored events only (no geyser): demo / read-only mode
     Demo {
-        #[arg(long, env = "DATABASE_URL", default_value = DEFAULT_DB, hide_env_values = true)]
+        #[arg(long, env = "DATABASE_URL", default_value = DEFAULT_STORE_URL, hide_env_values = true)]
         db: String,
         #[arg(long, default_value = DEFAULT_BIND)]
         bind: String,
@@ -135,7 +134,7 @@ enum ParserCmd {
     New {
         #[arg(long)]
         idl: std::path::PathBuf,
-        #[arg(long, default_value = "./idls")]
+        #[arg(long, default_value = DEFAULT_IDL_DIR)]
         idl_dir: std::path::PathBuf,
         /// Allow Breaking diffs and unmapped Generic fields
         #[arg(long)]
@@ -143,7 +142,7 @@ enum ParserCmd {
     },
     /// List loaded program addresses
     List {
-        #[arg(long, default_value = "./idls")]
+        #[arg(long, default_value = DEFAULT_IDL_DIR)]
         idl_dir: std::path::PathBuf,
     },
     /// Diff two IDL files (exit 1 on Breaking)
@@ -157,14 +156,14 @@ enum ParserCmd {
         program_id: String,
         #[arg(long, env = "SOLANA_RPC_URL", default_value = DEFAULT_RPC_URL, hide_env_values = true)]
         rpc_url: String,
-        #[arg(long, default_value = "./idls")]
+        #[arg(long, default_value = DEFAULT_IDL_DIR)]
         idl_dir: std::path::PathBuf,
         #[arg(long)]
         force: bool,
     },
     /// Poll on-chain IDLs and update local copies on drift
     Watch {
-        #[arg(long, default_value = "./idls")]
+        #[arg(long, default_value = DEFAULT_IDL_DIR)]
         idl_dir: std::path::PathBuf,
         #[arg(long, env = "SOLANA_RPC_URL", default_value = DEFAULT_RPC_URL, hide_env_values = true)]
         rpc_url: String,
@@ -185,25 +184,6 @@ enum ConfigCmd {
     },
 }
 
-struct ResolvedRunArgs {
-    endpoint: String,
-    auth_token: String,
-    db: String,
-    idl_dir: std::path::PathBuf,
-    bind: String,
-    wallets: Vec<String>,
-    rpc_url: Option<String>,
-    sinks: Vec<pipeline::config_file::SinkConfig>,
-    api_keys: Vec<String>,
-    grpc_bind: Option<std::net::SocketAddr>,
-    track_failed: bool,
-    track_tokens: bool,
-    accounts_include: Vec<String>,
-    replay: pipeline::config_file::ReplayMode,
-    ping_secs: u64,
-    compression: pipeline::config_file::CompressionKind,
-}
-
 struct RunCliOverrides {
     config_path: Option<std::path::PathBuf>,
     endpoint: Option<String>,
@@ -213,13 +193,14 @@ struct RunCliOverrides {
     bind: Option<String>,
     wallets: Vec<String>,
     grpc_bind: Option<String>,
+    tui: bool,
 }
 
 /// Resolve CLI > env > YAML. `env` must return `None` for unset or empty vars.
 fn resolve_run_args(
     overrides: RunCliOverrides,
     env: impl Fn(&str) -> Option<String>,
-) -> Result<ResolvedRunArgs> {
+) -> Result<pipeline::run::RunArgs> {
     let RunCliOverrides {
         config_path,
         endpoint,
@@ -229,6 +210,7 @@ fn resolve_run_args(
         bind,
         wallets,
         grpc_bind,
+        tui,
     } = overrides;
     let config_path = config_path.as_deref();
     let cfg = config_path
@@ -261,7 +243,7 @@ fn resolve_run_args(
         .filter(|s| !s.trim().is_empty())
         .or_else(|| cfg.as_ref().map(|c| c.store.url.clone()))
         .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| DEFAULT_DB.to_string());
+        .unwrap_or_else(|| DEFAULT_STORE_URL.to_string());
 
     let bind = bind
         .filter(|s| !s.trim().is_empty())
@@ -284,7 +266,8 @@ fn resolve_run_args(
         })
         .unwrap_or_else(|| std::path::PathBuf::from(DEFAULT_IDL_DIR));
 
-    bind.parse::<std::net::SocketAddr>()
+    let ws_bind = bind
+        .parse::<std::net::SocketAddr>()
         .map_err(|e| anyhow::anyhow!("serve.bind is not a valid socket address: {bind}: {e}"))?;
 
     let rpc_url = cfg
@@ -298,10 +281,7 @@ fn resolve_run_args(
     // A present but empty key setting is an error, so a config slip cannot turn auth off.
     let api_keys = match cfg.as_ref().and_then(|c| c.auth.as_ref()) {
         Some(auth) => auth.keys()?,
-        None => match env("INDEX_API_KEYS") {
-            Some(raw) => pipeline::config_file::parse_api_keys(&raw)?.unwrap_or_default(),
-            None => Vec::new(),
-        },
+        None => pipeline::config_file::env_api_keys(&env)?,
     };
 
     let grpc_bind = grpc_bind
@@ -323,19 +303,24 @@ fn resolve_run_args(
         .map(|c| c.geyser.accounts_include.clone())
         .unwrap_or_default();
     let replay = cfg.as_ref().map(|c| c.geyser.replay).unwrap_or_default();
-    let ping_secs = cfg.as_ref().map(|c| c.geyser.ping_secs).unwrap_or(10);
+    let ping_secs = cfg
+        .as_ref()
+        .map(|c| c.geyser.ping_secs)
+        .unwrap_or(DEFAULT_PING_SECS);
     let compression = cfg
         .as_ref()
         .map(|c| c.geyser.compression)
         .unwrap_or_default();
+    let clickhouse = cfg.as_ref().and_then(|c| c.clickhouse.clone());
 
-    Ok(ResolvedRunArgs {
+    Ok(pipeline::run::RunArgs {
         endpoint,
         auth_token,
         db,
         idl_dir,
-        bind,
+        ws_bind,
         wallets,
+        tui,
         rpc_url,
         sinks,
         api_keys,
@@ -346,6 +331,7 @@ fn resolve_run_args(
         replay,
         ping_secs,
         compression,
+        clickhouse,
     })
 }
 
@@ -437,7 +423,7 @@ async fn run_cli() -> Result<()> {
             tui,
             grpc_bind,
         } => {
-            let resolved = resolve_run_args(
+            let args = resolve_run_args(
                 RunCliOverrides {
                     config_path: config,
                     endpoint,
@@ -447,30 +433,11 @@ async fn run_cli() -> Result<()> {
                     bind,
                     wallets,
                     grpc_bind,
+                    tui,
                 },
                 pipeline::config_file::env_var,
             )?;
-            let ws_bind: std::net::SocketAddr = resolved.bind.parse()?;
-            pipeline::run::run(pipeline::run::RunArgs {
-                endpoint: resolved.endpoint,
-                auth_token: resolved.auth_token,
-                db: resolved.db,
-                idl_dir: resolved.idl_dir,
-                ws_bind,
-                wallets: resolved.wallets,
-                tui,
-                rpc_url: resolved.rpc_url,
-                sinks: resolved.sinks,
-                api_keys: resolved.api_keys,
-                grpc_bind: resolved.grpc_bind,
-                track_failed: resolved.track_failed,
-                track_tokens: resolved.track_tokens,
-                accounts_include: resolved.accounts_include,
-                replay: resolved.replay,
-                ping_secs: resolved.ping_secs,
-                compression: resolved.compression,
-            })
-            .await
+            pipeline::run::run(args).await
         }
         Commands::Probe {
             config,
@@ -487,6 +454,7 @@ async fn run_cli() -> Result<()> {
                     bind: None,
                     wallets: Vec::new(),
                     grpc_bind: None,
+                    tui: false,
                 },
                 pipeline::config_file::env_var,
             )?;
@@ -504,14 +472,11 @@ async fn run_cli() -> Result<()> {
                 .parse()
                 .map_err(|e| anyhow::anyhow!("invalid --bind {bind}: {e}"))?;
             let db = if db.trim().is_empty() {
-                DEFAULT_DB.to_string()
+                DEFAULT_STORE_URL.to_string()
             } else {
                 db
             };
-            let api_keys = match pipeline::config_file::env_var("INDEX_API_KEYS") {
-                Some(raw) => pipeline::config_file::parse_api_keys(&raw)?.unwrap_or_default(),
-                None => Vec::new(),
-            };
+            let api_keys = pipeline::config_file::env_api_keys(pipeline::config_file::env_var)?;
             pipeline::demo::run_demo(db, bind, api_keys).await
         }
         Commands::Parser { action } => match action {
@@ -558,6 +523,7 @@ mod tests {
             bind: None,
             wallets: Vec::new(),
             grpc_bind: None,
+            tui: false,
         }
     }
 
@@ -596,7 +562,7 @@ sinks: []
         assert_eq!(resolved.endpoint, "https://yaml.example");
         assert_eq!(resolved.auth_token, "yaml-token");
         assert_eq!(resolved.db, "sqlite:./yaml.db");
-        assert_eq!(resolved.bind, "127.0.0.1:9090");
+        assert_eq!(resolved.ws_bind.to_string(), "127.0.0.1:9090");
     }
 
     #[test]
@@ -631,15 +597,15 @@ sinks: []
         let path = write_config("cli-default", &yaml);
         let mut cli = overrides(Some(path.clone()));
         cli.bind = Some(DEFAULT_BIND.into());
-        cli.db = Some(DEFAULT_DB.into());
+        cli.db = Some(DEFAULT_STORE_URL.into());
         cli.idl_dir = Some(DEFAULT_IDL_DIR.into());
         let resolved = resolve_run_args(cli, |_| None).expect("resolve");
         let defaults = resolve_run_args(overrides(Some(path.clone())), |_| None).expect("resolve");
         let _ = std::fs::remove_file(&path);
-        assert_eq!(resolved.bind, DEFAULT_BIND);
-        assert_eq!(resolved.db, DEFAULT_DB);
+        assert_eq!(resolved.ws_bind.to_string(), DEFAULT_BIND);
+        assert_eq!(resolved.db, DEFAULT_STORE_URL);
         assert_eq!(resolved.idl_dir, std::path::PathBuf::from(DEFAULT_IDL_DIR));
-        assert_eq!(defaults.bind, "0.0.0.0:9090");
+        assert_eq!(defaults.ws_bind.to_string(), "0.0.0.0:9090");
         assert_eq!(defaults.idl_dir, std::path::PathBuf::from("./yaml-idls"));
     }
 
@@ -649,7 +615,7 @@ sinks: []
         let run = cmd.find_subcommand_mut("run").expect("run");
         for (id, default) in [
             ("bind", DEFAULT_BIND),
-            ("db", DEFAULT_DB),
+            ("db", DEFAULT_STORE_URL),
             ("idl_dir", DEFAULT_IDL_DIR),
         ] {
             let arg = run.get_arguments().find(|a| a.get_id() == id).expect("arg");

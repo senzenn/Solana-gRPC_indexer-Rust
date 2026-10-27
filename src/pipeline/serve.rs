@@ -410,15 +410,10 @@ async fn send_frame(socket: &mut WebSocket, frame: Message) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pipeline::testutil::TempDb;
+    use crate::pipeline::testutil::temp_store;
     use axum::http::HeaderValue;
     use futures::StreamExt;
     use tokio_tungstenite::tungstenite::Message as WsMessage;
-
-    async fn temp_store() -> (Arc<EventStore>, TempDb) {
-        let db = TempDb::new();
-        (Arc::new(EventStore::open(&db.url).await.unwrap()), db)
-    }
 
     async fn spawn_app(
         store: Arc<EventStore>,
@@ -653,7 +648,7 @@ mod tests {
                 .header("host", host);
             async move { req.send().await.unwrap().status().as_u16() }
         };
-        // router() no longer depends on the bind, so this covers a 0.0.0.0 container bind too.
+        // router() does not take the bind, so this covers a 0.0.0.0 bind too.
         assert_eq!(status("rebind.evil.example").await, 403);
         assert_eq!(status("evil.example").await, 403);
         assert_eq!(status("localhost:1234").await, 200);

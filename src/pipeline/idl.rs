@@ -102,14 +102,13 @@ impl IdlRouter {
             .find_map(|&len| program.instructions.get(ix.data.get(..len)?))?;
         let ix_def = program.idl.instructions.get(*index)?;
 
-        let args = decode_args::decode_args(&program.types, ix_def, &ix.data)
-            .ok()
-            .filter(|value| {
-                value
-                    .as_object()
-                    .map(|map| !map.is_empty())
-                    .unwrap_or(false)
-            });
+        let args = decode_args::decode_args(&program.types, ix_def, &ix.data);
+        let args = Some(args).filter(|value| {
+            value
+                .as_object()
+                .map(|map| !map.is_empty())
+                .unwrap_or(false)
+        });
 
         let named_accounts = named_accounts_from_ix(ix_def, &ix.accounts);
 

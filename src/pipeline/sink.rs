@@ -7,6 +7,7 @@ use tracing::warn;
 
 use super::config_file::SinkConfig;
 use super::event::IndexEvent;
+use super::geyser::url_label;
 
 #[derive(Debug, Clone, Default)]
 pub struct SinkFilter {
@@ -68,13 +69,12 @@ impl SinkFanout {
         Self { sinks }
     }
 
-    pub async fn send(&self, event: &IndexEvent) -> Result<()> {
+    pub async fn send(&self, event: &IndexEvent) {
         for sink in &self.sinks {
             if let Err(err) = sink.send(event).await {
                 warn!(error = %format_args!("{err:#}"), "event sink failed");
             }
         }
-        Ok(())
     }
 }
 
@@ -136,14 +136,9 @@ fn webhook_url(cfg: &SinkConfig) -> Result<Url> {
 
 impl WebhookSink {
     fn new(url: Url, cfg: &SinkConfig, client: Client) -> Self {
-        let host = url.host_str().unwrap_or_default();
-        let label = match url.port() {
-            Some(port) => format!("{}://{host}:{port}", url.scheme()),
-            None => format!("{}://{host}", url.scheme()),
-        };
         Self {
+            label: url_label(&url),
             url,
-            label,
             filter: SinkFilter::from(cfg),
             client,
         }
@@ -242,22 +237,7 @@ fn build_sink(cfg: &SinkConfig, client: &Client) -> Result<Box<dyn EventSink + S
 mod tests {
     use super::*;
     use crate::pipeline::event::IndexEvent;
-
-    fn token_transfer_event() -> IndexEvent {
-        IndexEvent::TokenTransfer {
-            slot: 1,
-            signature: "sig".into(),
-            ix_index: 0,
-            ix_path: "0".into(),
-            program: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".into(),
-            source: "a".into(),
-            destination: "b".into(),
-            authority: None,
-            mint: None,
-            amount: 1,
-            decimals: None,
-        }
-    }
+    use crate::pipeline::testutil::transfer;
 
     fn program_ix_event() -> IndexEvent {
         IndexEvent::ProgramIx {
@@ -278,7 +258,7 @@ mod tests {
     #[test]
     fn empty_filter_matches_all() {
         let filter = SinkFilter::default();
-        assert!(matches_filter(&token_transfer_event(), &filter));
+        assert!(matches_filter(&transfer(1, "sig"), &filter));
         assert!(matches_filter(&program_ix_event(), &filter));
     }
 
@@ -289,7 +269,7 @@ mod tests {
             programs: None,
             instructions: None,
         };
-        assert!(matches_filter(&token_transfer_event(), &filter));
+        assert!(matches_filter(&transfer(1, "sig"), &filter));
         assert!(!matches_filter(&program_ix_event(), &filter));
     }
 
@@ -301,7 +281,7 @@ mod tests {
             instructions: None,
         };
         assert!(matches_filter(&program_ix_event(), &filter));
-        assert!(!matches_filter(&token_transfer_event(), &filter));
+        assert!(!matches_filter(&transfer(1, "sig"), &filter));
     }
 
     #[test]
@@ -312,7 +292,14 @@ mod tests {
             instructions: None,
         };
         assert!(matches_filter(&program_ix_event(), &filter));
-        assert!(!matches_filter(&token_transfer_event(), &filter));
+        // The program matches, the kind does not.
+        let drift = IndexEvent::IdlDrift {
+            program_id: "prog".into(),
+            program_name: "pump".into(),
+            severity: "breaking".into(),
+            summary: "args changed".into(),
+        };
+        assert!(!matches_filter(&drift, &filter));
     }
 
     #[test]
@@ -323,7 +310,7 @@ mod tests {
             instructions: Some(vec!["buy".into()]),
         };
         assert!(matches_filter(&program_ix_event(), &filter));
-        assert!(!matches_filter(&token_transfer_event(), &filter));
+        assert!(!matches_filter(&transfer(1, "sig"), &filter));
     }
 
     #[test]
@@ -375,7 +362,7 @@ mod tests {
             "url": format!("http://{addr}/hook/secret-token?key=hunter2"),
         }));
         let sink = WebhookSink::new(webhook_url(&cfg).unwrap(), &cfg, webhook_client().unwrap());
-        let err = sink.send(&token_transfer_event()).await.unwrap_err();
+        let err = sink.send(&transfer(1, "sig")).await.unwrap_err();
         let text = format!("{err:#}");
         assert!(
             !text.contains("secret-token") && !text.contains("hunter2"),
@@ -414,7 +401,7 @@ mod tests {
             "url": format!("http://{addr}/hook"),
         }));
         let sink = WebhookSink::new(webhook_url(&cfg).unwrap(), &cfg, webhook_client().unwrap());
-        let err = sink.send(&token_transfer_event()).await.unwrap_err();
+        let err = sink.send(&transfer(1, "sig")).await.unwrap_err();
         assert!(format!("{err:#}").contains("307"), "{err:#}");
         assert_eq!(followed.load(Ordering::SeqCst), 0);
     }

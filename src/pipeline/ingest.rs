@@ -48,6 +48,7 @@ pub struct IngestConfig {
     pub compression: CompressionKind,
 }
 
+#[cfg(test)]
 impl Default for IngestConfig {
     fn default() -> Self {
         Self {
@@ -60,7 +61,7 @@ impl Default for IngestConfig {
             track_tokens: false,
             track_failed: false,
             replay: ReplayMode::Auto,
-            ping_secs: 10,
+            ping_secs: super::config_file::DEFAULT_PING_SECS,
             compression: CompressionKind::Zstd,
         }
     }
@@ -153,26 +154,8 @@ async fn stream_once(
     received: &mut bool,
 ) -> Result<()> {
     let mut client = geyser::connect(&cfg.endpoint, &cfg.auth_token, cfg.compression).await?;
-
-    match client.get_version().await {
-        Ok(info) => info!(version = %info.version, "geyser GetVersion"),
-        Err(err) => warn!(error = %err, "GetVersion skipped"),
-    }
-
-    let (replay_supported, first_available) = match client.subscribe_replay_info().await {
-        // Yellowstone answers Ok with no slot when its replay buffer is off.
-        Ok(info) => {
-            info!(first_available = ?info.first_available, "geyser replay info");
-            (info.first_available.is_some(), info.first_available)
-        }
-        Err(err) => {
-            info!(error = %err, "geyser replay not advertised; from_slot off");
-            (false, None)
-        }
-    };
-
-    let mut from_slot =
-        geyser::resolve_from_slot(from_slot, cfg.replay, replay_supported, first_available);
+    let (_, first_available) = geyser::server_info(&mut client).await;
+    let mut from_slot = geyser::resolve_from_slot(from_slot, cfg.replay, first_available);
     let mut request = build_request(cfg, from_slot);
     if request.transactions.is_empty() {
         warn!("no program/wallet filters; subscribing to slots only (no transactions)");
@@ -212,12 +195,7 @@ async fn stream_once(
                 }
             } => {
                 ping_id = ping_id.wrapping_add(1);
-                let _ = subscribe_tx
-                    .send(SubscribeRequest {
-                        ping: Some(SubscribeRequestPing { id: ping_id }),
-                        ..Default::default()
-                    })
-                    .await;
+                let _ = subscribe_tx.send(ping_request(ping_id)).await;
             }
             msg = stream.next() => {
                 let Some(msg) = msg else {
@@ -245,12 +223,7 @@ async fn stream_once(
                 match on_update(update, cfg.track_failed, received) {
                     Action::ReplyPing => {
                         ping_id = ping_id.wrapping_add(1);
-                        let _ = subscribe_tx
-                            .send(SubscribeRequest {
-                                ping: Some(SubscribeRequestPing { id: ping_id }),
-                                ..Default::default()
-                            })
-                            .await;
+                        let _ = subscribe_tx.send(ping_request(ping_id)).await;
                     }
                     Action::Forward(out) => {
                         if tx.send(out).await.is_err() {
@@ -263,6 +236,13 @@ async fn stream_once(
         }
     }
     Ok(())
+}
+
+fn ping_request(id: i32) -> SubscribeRequest {
+    SubscribeRequest {
+        ping: Some(SubscribeRequestPing { id }),
+        ..Default::default()
+    }
 }
 
 fn build_request(cfg: &IngestConfig, from_slot: Option<u64>) -> SubscribeRequest {
@@ -454,6 +434,7 @@ pub fn decode_instructions(
 mod tests {
     use super::*;
     use crate::pipeline::event::IndexEvent;
+    use crate::pipeline::testutil::spl_transfer_ix;
 
     #[test]
     fn compiled_to_raw_resolves_accounts() {
@@ -508,17 +489,7 @@ mod tests {
     #[test]
     fn decode_instructions_skips_token_ix_when_disabled() {
         let router = IdlRouter::default();
-        let mut data = vec![3u8]; // SPL Token transfer tag
-        data.extend_from_slice(&1_000u64.to_le_bytes());
-        let ixs = vec![RawInstruction {
-            slot: 42,
-            signature: "sig".into(),
-            path: IxPath::root(0),
-            program_id: TOKEN_PROGRAM.into(),
-            accounts: vec!["src".into(), "dst".into(), "auth".into()],
-            data,
-            failed: false,
-        }];
+        let ixs = vec![spl_transfer_ix(42)];
         let events = decode_instructions(&router, &ixs, false);
         assert!(events.is_empty());
     }
@@ -526,17 +497,7 @@ mod tests {
     #[test]
     fn decode_instructions_parses_token_ix_when_enabled() {
         let router = IdlRouter::default();
-        let mut data = vec![3u8]; // SPL Token transfer tag
-        data.extend_from_slice(&1_000u64.to_le_bytes());
-        let ixs = vec![RawInstruction {
-            slot: 42,
-            signature: "sig".into(),
-            path: IxPath::root(0),
-            program_id: TOKEN_PROGRAM.into(),
-            accounts: vec!["src".into(), "dst".into(), "auth".into()],
-            data,
-            failed: false,
-        }];
+        let ixs = vec![spl_transfer_ix(42)];
         let events = decode_instructions(&router, &ixs, true);
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], IndexEvent::TokenTransfer { .. }));

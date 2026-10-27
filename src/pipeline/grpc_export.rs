@@ -56,16 +56,8 @@ impl ExportService {
         let permit = slots
             .try_acquire()
             .map_err(|_| Status::resource_exhausted("too many StreamEvents clients"))?;
-        let kind_filter = if req.kind.is_empty() {
-            None
-        } else {
-            Some(req.kind)
-        };
-        let program_filter = if req.program.is_empty() {
-            None
-        } else {
-            Some(req.program)
-        };
+        let kind_filter = non_empty(req.kind);
+        let program_filter = non_empty(req.program);
 
         let mut rx = self.events.subscribe();
         let (tx, out) = mpsc::channel(STREAM_BUFFER);
@@ -134,11 +126,6 @@ impl IndexExport for ExportService {
         request: Request<GetEventsRequest>,
     ) -> Result<Response<GetEventsResponse>, Status> {
         let req = request.into_inner();
-        let limit = if req.limit == 0 {
-            100
-        } else {
-            req.limit.min(500)
-        };
         let offset = i64::try_from(req.offset)
             .ok()
             .filter(|o| *o <= MAX_EVENT_OFFSET)
@@ -153,26 +140,15 @@ impl IndexExport for ExportService {
                 i64::MAX
             )));
         }
+        // query_events maps 0 to the default limit and caps the rest.
         let filter = EventFilter {
-            limit: limit as i64,
+            limit: i64::try_from(req.limit).unwrap_or(i64::MAX),
             offset,
             since_slot,
             until_slot,
-            kind: if req.kind.is_empty() {
-                None
-            } else {
-                Some(req.kind)
-            },
-            program: if req.program.is_empty() {
-                None
-            } else {
-                Some(req.program)
-            },
-            signature: if req.signature.is_empty() {
-                None
-            } else {
-                Some(req.signature)
-            },
+            kind: non_empty(req.kind),
+            program: non_empty(req.program),
+            signature: non_empty(req.signature),
         };
         let events = self
             .store
@@ -183,6 +159,11 @@ impl IndexExport for ExportService {
             events: events.iter().map(to_msg).collect(),
         }))
     }
+}
+
+/// Proto3 sends an unset string as "".
+fn non_empty(s: String) -> Option<String> {
+    (!s.is_empty()).then_some(s)
 }
 
 fn store_status(err: anyhow::Error) -> Status {
@@ -228,7 +209,7 @@ pub async fn serve(bind: SocketAddr, service: ExportService, auth: Arc<ApiKeySta
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pipeline::testutil::TempDb;
+    use crate::pipeline::testutil::{TempDb, transfer};
     use tokio_stream::StreamExt;
     use tonic::metadata::MetadataValue;
 
@@ -241,22 +222,6 @@ mod tests {
             store: Arc::new(store),
         };
         (svc, db)
-    }
-
-    fn transfer(slot: u64, signature: &str) -> IndexEvent {
-        IndexEvent::TokenTransfer {
-            slot,
-            signature: signature.into(),
-            ix_index: 0,
-            ix_path: "0".into(),
-            program: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".into(),
-            source: "a".into(),
-            destination: "b".into(),
-            authority: None,
-            mint: None,
-            amount: 1,
-            decimals: None,
-        }
     }
 
     #[test]

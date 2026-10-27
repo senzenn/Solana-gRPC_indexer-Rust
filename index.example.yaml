@@ -15,7 +15,7 @@ geyser:
   track_tokens: false
   # Extra account pubkeys to include in the geyser transaction filter
   accounts_include: []
-  # from_slot on reconnect: auto (probe SubscribeReplayInfo) | on | off
+  # from_slot at start and on reconnect: auto (probe SubscribeReplayInfo) | on | off
   replay: auto
   # Keepalive ping so Triton/Richat load balancers do not drop the stream
   ping_secs: 10
@@ -42,13 +42,21 @@ sinks:
   - kind: stdout
     # Optional filters (all must match when set):
     # types: ["program_ix", "token_transfer"]
-    # programs: ["pump"]
+    # programs: ["pumpFun"]   # exact IDL program name
     # instructions: ["buy", "sell"]
 
 # Optional gRPC export for downstream consumers. With auth.api_keys set, clients
 # send metadata x-api-key or authorization: Bearer. No TLS: same proxy rule as serve.bind.
 # grpc:
 #   bind: "127.0.0.1:50051"
+
+# Optional copy of finalized events in ClickHouse, through a durable outbox table.
+# Set the password with CLICKHOUSE_PASSWORD.
+# clickhouse:
+#   url: "http://127.0.0.1:8123"
+#   database: "default"
+#   table: "index_events"
+#   user: "default"
 
 # Keys: letters, digits and -._~ only, so the live view can send them as a
 # WebSocket subprotocol. Open the live view as http://127.0.0.1:8080/#key=<key>.

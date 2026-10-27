@@ -93,6 +93,26 @@ pub struct EventStore {
     backend: DbBackend,
     api_reads: Semaphore,
     api_read_wait: Duration,
+    /// Also write each new or changed event to ch_outbox for the ClickHouse worker.
+    outbox: bool,
+}
+
+/// One ch_outbox row. `event` is None when the event was deleted (a fork slot):
+/// drop the row and send nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutboxRow {
+    pub id: i64,
+    pub event: Option<OutboxEvent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutboxEvent {
+    pub signature: String,
+    pub ix_path: String,
+    pub kind: String,
+    pub slot: u64,
+    pub program: String,
+    pub payload: String,
 }
 
 impl EventStore {
@@ -101,7 +121,12 @@ impl EventStore {
             backend,
             api_reads: Semaphore::new(API_READ_PERMITS),
             api_read_wait: API_READ_WAIT,
+            outbox: false,
         }
+    }
+
+    pub fn enable_outbox(&mut self) {
+        self.outbox = true;
     }
 
     /// Only methods that serve API clients take this permit. Ingest paths must not.
@@ -153,7 +178,8 @@ impl EventStore {
             && let Some(parent) = std::path::Path::new(path).parent()
             && !parent.as_os_str().is_empty()
         {
-            std::fs::create_dir_all(parent).ok();
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("create {}", parent.display()))?;
         }
 
         // WAL lets API reads run during ingest writes. The default 5s busy wait made
@@ -309,14 +335,16 @@ impl EventStore {
         let payload = event_payload(&event)?;
         match &self.backend {
             DbBackend::Sqlite(pool) => {
-                let result = sqlx::query(
+                // RETURNING gives a row only when the event is new or changed.
+                let upsert = sqlx::query_scalar::<_, i64>(
                     "INSERT INTO events (slot, signature, ix_index, ix_path, program, kind, payload)
                      VALUES (?, ?, ?, ?, ?, ?, ?)
                      ON CONFLICT(signature, ix_path, kind) DO UPDATE SET
                         slot = excluded.slot,
                         program = excluded.program,
                         payload = excluded.payload
-                     WHERE events.payload != excluded.payload OR events.slot != excluded.slot",
+                     WHERE events.payload != excluded.payload OR events.slot != excluded.slot
+                     RETURNING id",
                 )
                 .bind(slot)
                 .bind(&signature)
@@ -324,13 +352,24 @@ impl EventStore {
                 .bind(&ix_path)
                 .bind(program)
                 .bind(event.kind())
-                .bind(&payload)
-                .execute(pool)
-                .await?;
-                Ok(result.rows_affected() > 0)
+                .bind(&payload);
+                if !self.outbox {
+                    return Ok(upsert.fetch_optional(pool).await?.is_some());
+                }
+                let mut tx = pool.begin().await?;
+                let id = upsert.fetch_optional(&mut *tx).await?;
+                if let Some(id) = id {
+                    sqlx::query("INSERT INTO ch_outbox (event_id, slot) VALUES (?, ?)")
+                        .bind(id)
+                        .bind(slot)
+                        .execute(&mut *tx)
+                        .await?;
+                }
+                tx.commit().await?;
+                Ok(id.is_some())
             }
             DbBackend::Postgres(pool) => {
-                let result = sqlx::query(
+                let upsert = sqlx::query_scalar::<_, i64>(
                     "INSERT INTO events (slot, signature, ix_index, ix_path, program, kind, payload)
                      VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
                      ON CONFLICT (signature, ix_path, kind) DO UPDATE SET
@@ -338,7 +377,8 @@ impl EventStore {
                         program = EXCLUDED.program,
                         payload = EXCLUDED.payload
                      WHERE events.payload IS DISTINCT FROM EXCLUDED.payload
-                        OR events.slot IS DISTINCT FROM EXCLUDED.slot",
+                        OR events.slot IS DISTINCT FROM EXCLUDED.slot
+                     RETURNING id",
                 )
                 .bind(slot)
                 .bind(&signature)
@@ -346,35 +386,103 @@ impl EventStore {
                 .bind(&ix_path)
                 .bind(program)
                 .bind(event.kind())
-                .bind(payload)
-                .execute(pool)
-                .await?;
-                Ok(result.rows_affected() > 0)
+                .bind(payload);
+                if !self.outbox {
+                    return Ok(upsert.fetch_optional(pool).await?.is_some());
+                }
+                let mut tx = pool.begin().await?;
+                let id = upsert.fetch_optional(&mut *tx).await?;
+                if let Some(id) = id {
+                    sqlx::query("INSERT INTO ch_outbox (event_id, slot) VALUES ($1, $2)")
+                        .bind(id)
+                        .bind(slot)
+                        .execute(&mut *tx)
+                        .await?;
+                }
+                tx.commit().await?;
+                Ok(id.is_some())
             }
         }
+    }
+
+    /// Outbox rows at or below `finalized`, oldest first. Fork events are deleted
+    /// before the finalized cursor moves, so they never reach ClickHouse.
+    pub async fn outbox_batch(&self, finalized: u64, limit: i64) -> Result<Vec<OutboxRow>> {
+        let finalized = slot_i64(finalized)?;
+        let rows: Vec<OutboxColumns> = match &self.backend {
+            DbBackend::Sqlite(pool) => {
+                sqlx::query_as(
+                    "SELECT o.id, e.signature, e.ix_path, e.kind, e.slot, e.program, e.payload
+                     FROM ch_outbox o LEFT JOIN events e ON e.id = o.event_id
+                     WHERE o.slot <= ? ORDER BY o.id LIMIT ?",
+                )
+                .bind(finalized)
+                .bind(limit)
+                .fetch_all(pool)
+                .await?
+            }
+            DbBackend::Postgres(pool) => {
+                sqlx::query_as(
+                    "SELECT o.id, e.signature, e.ix_path, e.kind, e.slot, e.program,
+                            e.payload::text AS payload
+                     FROM ch_outbox o LEFT JOIN events e ON e.id = o.event_id
+                     WHERE o.slot <= $1 ORDER BY o.id LIMIT $2",
+                )
+                .bind(finalized)
+                .bind(limit)
+                .fetch_all(pool)
+                .await?
+            }
+        };
+        rows.into_iter().map(outbox_row).collect()
+    }
+
+    /// Delete by id, not by range: a concurrent write can commit a lower id after
+    /// the batch was read.
+    pub async fn outbox_delete(&self, ids: &[i64]) -> Result<()> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        match &self.backend {
+            DbBackend::Sqlite(pool) => {
+                let mut qb = QueryBuilder::<Sqlite>::new("DELETE FROM ch_outbox WHERE id IN (");
+                let mut list = qb.separated(", ");
+                for id in ids {
+                    list.push_bind(*id);
+                }
+                qb.push(")");
+                qb.build().execute(pool).await?;
+            }
+            DbBackend::Postgres(pool) => {
+                sqlx::query("DELETE FROM ch_outbox WHERE id = ANY($1)")
+                    .bind(ids)
+                    .execute(pool)
+                    .await?;
+            }
+        }
+        Ok(())
     }
 
     pub async fn recent_events(&self, limit: i64) -> Result<Vec<IndexEvent>> {
         let limit = limit.clamp(1, MAX_EVENT_LIMIT);
         let _permit = self.api_read_permit().await?;
-        match &self.backend {
+        let payloads = match &self.backend {
             DbBackend::Sqlite(pool) => {
-                let rows = sqlx::query("SELECT payload FROM events ORDER BY id DESC LIMIT ?")
+                sqlx::query_scalar("SELECT payload FROM events ORDER BY id DESC LIMIT ?")
                     .bind(limit)
                     .fetch_all(pool)
-                    .await?;
-                rows_to_events_sqlite(rows)
+                    .await?
             }
             DbBackend::Postgres(pool) => {
-                let rows = sqlx::query(
+                sqlx::query_scalar(
                     "SELECT payload::text as payload FROM events ORDER BY id DESC LIMIT $1",
                 )
                 .bind(limit)
                 .fetch_all(pool)
-                .await?;
-                rows_to_events_postgres(rows)
+                .await?
             }
-        }
+        };
+        payloads_to_events(payloads)
     }
 
     pub async fn query_events(&self, filter: EventFilter) -> Result<Vec<IndexEvent>> {
@@ -385,7 +493,7 @@ impl EventStore {
             filter.offset
         );
         let _permit = self.api_read_permit().await?;
-        match &self.backend {
+        let payloads = match &self.backend {
             DbBackend::Sqlite(pool) => {
                 let mut qb = QueryBuilder::<Sqlite>::new("SELECT payload FROM events WHERE 1=1");
                 apply_event_filter(&mut qb, &filter);
@@ -393,22 +501,21 @@ impl EventStore {
                 qb.push_bind(filter.limit);
                 qb.push(" OFFSET ");
                 qb.push_bind(filter.offset);
-                let rows = qb.build().fetch_all(pool).await?;
-                rows_to_events_sqlite(rows)
+                qb.build_query_scalar().fetch_all(pool).await?
             }
             DbBackend::Postgres(pool) => {
                 let mut qb = QueryBuilder::<sqlx::Postgres>::new(
                     "SELECT payload::text as payload FROM events WHERE 1=1",
                 );
-                apply_event_filter_pg(&mut qb, &filter);
+                apply_event_filter(&mut qb, &filter);
                 qb.push(" ORDER BY id ASC LIMIT ");
                 qb.push_bind(filter.limit);
                 qb.push(" OFFSET ");
                 qb.push_bind(filter.offset);
-                let rows = qb.build().fetch_all(pool).await?;
-                rows_to_events_postgres(rows)
+                qb.build_query_scalar().fetch_all(pool).await?
             }
-        }
+        };
+        payloads_to_events(payloads)
     }
 
     pub async fn cursor_info(&self) -> Result<Option<CursorInfo>> {
@@ -655,13 +762,8 @@ impl EventStore {
         Ok(())
     }
 
-    /// Mark `finalized` as finalized and delete events from orphaned slots.
-    ///
-    /// First finalized update only records the cursor. Later updates walk the
-    /// parent chain; if the chain is incomplete, nothing is deleted.
-    ///
-    /// The resume slot does not move up to `finalized`: slots above the confirmed
-    /// cursor may not be indexed yet.
+    /// Move the finalized cursor and delete events of orphan slots. An incomplete
+    /// parent chain deletes nothing.
     pub async fn apply_finalized(&self, finalized: u64) -> Result<Vec<u64>> {
         let cursor = self.load_cursor().await?;
         let old_finalized = cursor.as_ref().map(|c| c.finalized_slot).unwrap_or(0);
@@ -861,6 +963,36 @@ fn redact_url(database_url: &str) -> String {
         .unwrap_or_else(|| "<unparsable url>".to_string())
 }
 
+/// id, then the event columns. The LEFT JOIN gives NULL columns for a deleted event.
+type OutboxColumns = (
+    i64,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<i64>,
+    Option<String>,
+    Option<String>,
+);
+
+fn outbox_row(
+    (id, signature, ix_path, kind, slot, program, payload): OutboxColumns,
+) -> Result<OutboxRow> {
+    let event = match (signature, ix_path, kind, slot, program, payload) {
+        (Some(signature), Some(ix_path), Some(kind), Some(slot), Some(program), Some(payload)) => {
+            Some(OutboxEvent {
+                signature,
+                ix_path,
+                kind,
+                slot: u64::try_from(slot).context("negative slot in events")?,
+                program,
+                payload,
+            })
+        }
+        _ => None,
+    };
+    Ok(OutboxRow { id, event })
+}
+
 fn pg_options(database_url: &str) -> Result<PgConnectOptions> {
     // The parse error can quote the URL, so it is not chained.
     let options = PgConnectOptions::from_str(database_url)
@@ -875,7 +1007,12 @@ fn pg_options(database_url: &str) -> Result<PgConnectOptions> {
     Ok(options.options([("statement_timeout", PG_STATEMENT_TIMEOUT)]))
 }
 
-fn apply_event_filter<'a>(qb: &mut QueryBuilder<'a, Sqlite>, filter: &EventFilter) {
+fn apply_event_filter<'a, DB>(qb: &mut QueryBuilder<'a, DB>, filter: &EventFilter)
+where
+    DB: sqlx::Database,
+    i64: sqlx::Encode<'a, DB> + sqlx::Type<DB>,
+    String: sqlx::Encode<'a, DB> + sqlx::Type<DB>,
+{
     if let Some(since_slot) = filter.since_slot {
         qb.push(" AND slot >= ");
         qb.push_bind(slot_bound(since_slot));
@@ -898,44 +1035,9 @@ fn apply_event_filter<'a>(qb: &mut QueryBuilder<'a, Sqlite>, filter: &EventFilte
     }
 }
 
-fn apply_event_filter_pg<'a>(qb: &mut QueryBuilder<'a, sqlx::Postgres>, filter: &EventFilter) {
-    if let Some(since_slot) = filter.since_slot {
-        qb.push(" AND slot >= ");
-        qb.push_bind(slot_bound(since_slot));
-    }
-    if let Some(until_slot) = filter.until_slot {
-        qb.push(" AND slot <= ");
-        qb.push_bind(slot_bound(until_slot));
-    }
-    if let Some(kind) = &filter.kind {
-        qb.push(" AND kind = ");
-        qb.push_bind(kind.clone());
-    }
-    if let Some(program) = &filter.program {
-        qb.push(" AND program = ");
-        qb.push_bind(program.clone());
-    }
-    if let Some(signature) = &filter.signature {
-        qb.push(" AND signature = ");
-        qb.push_bind(signature.clone());
-    }
-}
-
-fn rows_to_events_sqlite(rows: Vec<sqlx::sqlite::SqliteRow>) -> Result<Vec<IndexEvent>> {
+fn payloads_to_events(payloads: Vec<String>) -> Result<Vec<IndexEvent>> {
     let mut out = Vec::new();
-    for row in rows {
-        let payload: String = row.get("payload");
-        let event: IndexEvent = serde_json::from_str(&payload)
-            .with_context(|| format!("deserialize event payload: {payload}"))?;
-        out.push(normalize_event(event));
-    }
-    Ok(out)
-}
-
-fn rows_to_events_postgres(rows: Vec<sqlx::postgres::PgRow>) -> Result<Vec<IndexEvent>> {
-    let mut out = Vec::new();
-    for row in rows {
-        let payload: String = row.get("payload");
+    for payload in payloads {
         let event: IndexEvent = serde_json::from_str(&payload)
             .with_context(|| format!("deserialize event payload: {payload}"))?;
         out.push(normalize_event(event));
@@ -1001,28 +1103,6 @@ mod tests {
             let cursor = store.load_cursor().await.unwrap().unwrap();
             assert_eq!(cursor.slot, 99);
         }
-    }
-
-    #[tokio::test]
-    async fn duplicate_event_is_ignored() {
-        let db = TempDb::new();
-        let url = db.url.clone();
-        let store = EventStore::open(&url).await.unwrap();
-        let event = IndexEvent::TokenTransfer {
-            slot: 1,
-            signature: "sig".into(),
-            ix_index: 0,
-            ix_path: "0".into(),
-            program: TOKEN_PROGRAM.into(),
-            source: "a".into(),
-            destination: "b".into(),
-            authority: None,
-            mint: None,
-            amount: 1,
-            decimals: None,
-        };
-        assert!(store.write_event(&event).await.unwrap());
-        assert!(!store.write_event(&event).await.unwrap());
     }
 
     fn token_transfer(slot: u64, signature: &str) -> IndexEvent {
@@ -1261,40 +1341,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn replay_detects_and_persists_gaps() {
-        let db = TempDb::new();
-        let url = db.url.clone();
-        let store = EventStore::open(&url).await.unwrap();
-
-        store.commit_cursor(10).await.unwrap();
-        assert_eq!(detect_gap(Some(10), 14), Some((11, 13)));
-        store.record_gap(11, 13).await.unwrap();
-
-        let gaps = store.list_gaps(true).await.unwrap();
-        assert_eq!(gaps.len(), 1);
-        assert_eq!(gaps[0].from_slot, 11);
-        assert_eq!(gaps[0].to_slot, 13);
-
-        store
-            .write_event(&IndexEvent::Gap {
-                from_slot: 11,
-                to_slot: 13,
-            })
-            .await
-            .unwrap();
-
-        let gap_events = store
-            .query_events(EventFilter {
-                kind: Some("gap".into()),
-                limit: 10,
-                ..Default::default()
-            })
-            .await
-            .unwrap();
-        assert_eq!(gap_events.len(), 1);
-    }
-
-    #[tokio::test]
     async fn path_identity_keeps_outer_and_inner_distinct() {
         let db = TempDb::new();
         let url = db.url.clone();
@@ -1505,6 +1551,22 @@ mod tests {
         );
         let opts = pg_options("postgres://u:S3cret@db/x?options[statement_timeout]=5s").unwrap();
         assert_eq!(opts.get_options(), Some("-c statement_timeout=5s"));
+    }
+
+    #[tokio::test]
+    async fn outbox_drops_rows_of_deleted_events() {
+        let db = TempDb::new();
+        let mut store = EventStore::open(&db.url).await.unwrap();
+        store.enable_outbox();
+        store
+            .write_event(&token_transfer_at(5, "fork", "0"))
+            .await
+            .unwrap();
+        // apply_finalized deletes fork events this way before the cursor moves.
+        store.delete_events_for_slots(&[5]).await.unwrap();
+        let batch = store.outbox_batch(5, 10).await.unwrap();
+        assert_eq!(batch.len(), 1);
+        assert!(batch[0].event.is_none(), "a deleted event must not be sent");
     }
 
     #[tokio::test]

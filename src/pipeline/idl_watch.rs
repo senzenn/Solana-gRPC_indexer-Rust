@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use idl_drift::{Severity, diff};
+use idl_drift::diff;
 use tokio::time::sleep;
 use tracing::{info, warn};
 
@@ -57,17 +57,7 @@ async fn check_one(cfg: &WatchConfig, program_id: &str) -> Result<()> {
     let baseline = std::fs::read_to_string(&baseline_path)?;
     let old = idl_drift::model::Idl::from_json(&baseline)?;
     let new = idl_drift::model::Idl::from_json(&fresh)?;
-    let report = diff(&old, &new);
-
-    let mut breaking = 0usize;
-    let mut dangerous = 0usize;
-    for change in &report.changes {
-        match change.severity {
-            Severity::Breaking => breaking += 1,
-            Severity::Dangerous => dangerous += 1,
-            Severity::Additive | Severity::Cosmetic => {}
-        }
-    }
+    let (breaking, dangerous, _, _) = diff(&old, &new).counts();
 
     if breaking == 0 && dangerous == 0 {
         return Ok(());
@@ -81,7 +71,7 @@ async fn check_one(cfg: &WatchConfig, program_id: &str) -> Result<()> {
     if breaking > 0 && !cfg.force_on_breaking {
         warn!(
             program_id,
-            "breaking drift — not updating (pass --force to overwrite)"
+            "breaking drift; not updating (pass --force to overwrite)"
         );
         return Ok(());
     }

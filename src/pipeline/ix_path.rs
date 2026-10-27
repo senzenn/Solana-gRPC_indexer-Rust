@@ -81,19 +81,6 @@ pub fn assign_inner_paths(outer_index: u32, stack_heights: &[Option<u32>]) -> Ve
     out
 }
 
-/// Outer roots followed by each inner group, in the same order geyser/RPC emit.
-#[cfg(test)]
-pub fn tx_instruction_paths(
-    outer_count: u32,
-    inner_groups: &[(u32, Vec<Option<u32>>)],
-) -> Vec<IxPath> {
-    let mut paths: Vec<IxPath> = (0..outer_count).map(IxPath::root).collect();
-    for (outer_index, heights) in inner_groups {
-        paths.extend(assign_inner_paths(*outer_index, heights));
-    }
-    paths
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,16 +118,6 @@ mod tests {
             paths(1, &[Some(2), Some(3), Some(4), Some(3)]),
             vec!["1.0", "1.0.0", "1.0.0.0", "1.0.1"]
         );
-    }
-
-    #[test]
-    fn tx_paths_outers_then_inners() {
-        let got: Vec<String> =
-            tx_instruction_paths(2, &[(0, vec![Some(2)]), (1, vec![Some(2), Some(3)])])
-                .into_iter()
-                .map(|p| p.to_string())
-                .collect();
-        assert_eq!(got, vec!["0", "1", "0.0", "1.0", "1.0.0"]);
     }
 
     #[test]

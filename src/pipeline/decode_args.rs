@@ -23,12 +23,12 @@ pub fn type_map(idl: &Idl) -> TypeMap {
     map
 }
 
-pub fn decode_args(types: &TypeMap, ix: &Instruction, data: &[u8]) -> Result<Value> {
+pub fn decode_args(types: &TypeMap, ix: &Instruction, data: &[u8]) -> Value {
     // Args start after the discriminator. Anchor uses 8 bytes; Codama and
     // Quasar programs can use other lengths.
     let cursor = ix.discriminator.len();
     if data.len() < cursor {
-        return Ok(json!({}));
+        return json!({});
     }
     let mut decoder = Decoder {
         types,
@@ -50,7 +50,7 @@ pub fn decode_args(types: &TypeMap, ix: &Instruction, data: &[u8]) -> Result<Val
         }
     }
 
-    Ok(Value::Object(out))
+    Value::Object(out)
 }
 
 struct Decoder<'a> {
@@ -322,7 +322,7 @@ mod tests {
 
     fn decode(idl: &Idl, name: &str, data: &[u8]) -> Value {
         let ix = idl.instructions.iter().find(|i| i.name == name).unwrap();
-        decode_args(&type_map(idl), ix, data).unwrap()
+        decode_args(&type_map(idl), ix, data)
     }
 
     const SWAP_OLD: &str = r#"{

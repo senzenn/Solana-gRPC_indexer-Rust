@@ -1,11 +1,11 @@
 # Solana Typed-Event Indexer
 
-Yellowstone geyser → IDL decode → SQLite/Postgres → HTTP/WebSocket live view.
+Yellowstone geyser -> IDL decode -> SQLite/Postgres -> HTTP/WebSocket live view.
 
 ## Quick start
 
 ```bash
-git clone https://github.com/<org>/Solana-gRPC_indexer-Rust.git
+git clone https://github.com/senzenn/Solana-gRPC_indexer-Rust.git
 cd Solana-gRPC_indexer-Rust
 cp .env.example .env          # set YELLOWSTONE_ENDPOINT, YELLOWSTONE_AUTH_TOKEN
 cp index.example.yaml index.yaml
@@ -15,13 +15,13 @@ open http://127.0.0.1:8080
 
 Full setup (IDL registration, Docker, validation): **[docs/quickstart.md](docs/quickstart.md)**
 
-`idl-drift` is vendored under `vendor/idl-drift` — clone and `cargo build` work standalone with no sibling repo.
+`idl-drift` is vendored under `vendor/idl-drift`. Clone and `cargo build` work with no sibling repo.
 
 ## Documentation
 
 | Guide | Contents |
 |-------|----------|
-| [Quickstart](docs/quickstart.md) | Clone → `.env` → `index.yaml` → run |
+| [Quickstart](docs/quickstart.md) | Clone -> `.env` -> `index.yaml` -> run |
 | [Config reference](docs/config-reference.md) | Every `index.yaml` field + env overrides |
 | [Operations runbook](docs/operations-runbook.md) | Cursor, gaps, backfill, IDL drift, troubleshooting |
 | [Product gaps](docs/feature-gaps.md) | Feature roadmap vs shipstern (decode, reorg, sinks) |
@@ -30,11 +30,11 @@ Full setup (IDL registration, Docker, validation): **[docs/quickstart.md](docs/q
 
 | Command | Purpose |
 |---------|---------|
-| `index run` | Start indexer (geyser → decode → store → serve) |
+| `index run` | Start indexer (geyser -> decode -> store -> serve) |
 | `index parser new --idl <file>` | Register a program IDL (idl-drift gated) |
 | `index parser list` | List loaded program IDs |
 | `index parser diff <old> <new>` | Diff two IDLs |
-| `index parser fetch --program-id <addr>` | Fetch Anchor IDL from chain (stamps the program id, derives legacy discriminators) |
+| `index parser fetch --program-id <addr>` | Fetch an Anchor IDL from chain and stamp the program id. Discriminators are derived when the IDL is parsed |
 | `index parser watch` | Poll chain for IDL drift and update local copies |
 | `index config validate` | Validate `index.yaml` |
 | `index demo` | Serve stored events only (no geyser) |
@@ -57,9 +57,7 @@ The same query routes are also served under `/v1` (`/v1/events`, `/v1/cursor`, `
 
 Set `auth.api_keys` in `index.yaml` or `INDEX_API_KEYS` env to protect `/events`, `/stream`, `/cursor`, `/gaps`, `/stats` and the `/v1` copies. `/`, `/health`, `/v1/health`, and `/metrics` stay public.
 
-The default bind is `127.0.0.1:8080`; a non-loopback bind with no API keys logs a warning. Neither the HTTP server nor the gRPC export has TLS. For any non-loopback bind, set API keys and put a TLS reverse proxy in front that sets `X-Forwarded-Host`. WebSocket clients send the key as `Sec-WebSocket-Protocol: index-key, <key>` (not `?api_key=`). The live view reads it from the page URL: `http://127.0.0.1:8080/#key=<key>`. Keys must use only letters, digits and `-._~`.
-
-With no API keys, on any bind, every route returns `403` unless `Host` is `localhost`, `*.localhost` or an IP literal (DNS-rebinding guard). A keyless server behind a reverse proxy that sends its domain name as `Host` gets `403`: set keys, or make the proxy send an IP literal such as `Host: 127.0.0.1`. The HTTP API serves HTTP/1.1 only.
+Bind, TLS, WebSocket keys and the `Host` check: see [`serve`](docs/config-reference.md#serve), [`auth`](docs/config-reference.md#auth) and [403 on every route](docs/operations-runbook.md#403-on-every-route).
 
 `/events` answers `400` for an `offset` above 10000 or a slot above `i64::MAX`, `503 {"error":"busy"}` when the API's DB connections stay busy for 5s, and a generic `500` for store errors. Connection and stream limits: [runbook](docs/operations-runbook.md#server-limits).
 
@@ -67,8 +65,8 @@ With no API keys, on any bind, every route returns `403` unless `Host` is `local
 
 When `grpc.bind` is set in config or `--grpc-bind 127.0.0.1:50051` is passed to `run`:
 
-- `StreamEvents` — live server-stream of parsed events (optional `kind` / `program` filter)
-- `GetEvents` — historical query (same filters as REST: `offset` max 10000, `until_slot`, `signature`; out-of-range values give `InvalidArgument`)
+- `StreamEvents`: live server-stream of parsed events (optional `kind` / `program` filter)
+- `GetEvents`: historical query (same filters as REST: `offset` max 10000, `until_slot`, `signature`). Out-of-range values give `InvalidArgument`
 
 With API keys set, each call needs metadata `x-api-key: <key>` or `authorization: Bearer <key>`.
 
@@ -93,11 +91,11 @@ See [docs/config-reference.md](docs/config-reference.md) and `index.example.yaml
 
 ## Local smoke
 
-No geyser key required: `./scripts/smoke-local.sh` starts demo on `testdata/smoke.db` and curls `/health`, `/events`, `/metrics`.
+`./scripts/smoke-local.sh` needs no geyser key. It builds, runs the tests and clippy, and validates `index.example.yaml`. Then it starts demo on a temporary `./.smoke-index.db` and curls `/health` and `/metrics`.
 
 ## Demo mode (no geyser)
 
-Serve an existing database read-only (good for sharing a snapshot without a geyser key):
+Serve the events in an existing database with no geyser key. Demo is not read-only: it runs migrations and creates the file if it is missing. To share a snapshot, serve a copy of it.
 
 ```bash
 cargo run -- demo --db sqlite:./index.db
@@ -110,12 +108,13 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Compose publishes on `127.0.0.1` only and passes the geyser `x-token` from `.env` as environment. Read-only demo: `docker compose --profile demo up --build demo` on `127.0.0.1:8081`. See [docs/quickstart.md](docs/quickstart.md#7-docker-alternative) for optional `index.yaml` mounting.
+Compose publishes on `127.0.0.1` only and passes the geyser `x-token` from `.env` as environment. Demo with no geyser: `docker compose --profile demo up --build demo` on `127.0.0.1:8081`. See [docs/quickstart.md](docs/quickstart.md#7-docker-alternative) for optional `index.yaml` mounting.
 
 ## What works
 
 - Anchor IDL decode (instruction name, args, named accounts)
 - Compiled shipstern parsers from IDLs in `parsers/` (see [parsers/README.md](parsers/README.md))
+- ClickHouse copy of finalized events through a durable outbox (`clickhouse` in [config-reference](docs/config-reference.md))
 - Configurable geyser filters (`track_tokens`, `track_failed`, `accounts_include`)
 - CPI-stable `ix_path` identity + upsert (geyser and RPC backfill)
 - Confirmed + finalized cursors with orphan-slot rollback

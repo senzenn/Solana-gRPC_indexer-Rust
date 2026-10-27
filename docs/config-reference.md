@@ -3,8 +3,8 @@
 The indexer is driven by a single YAML file. Copy `index.example.yaml` to `index.yaml` and adjust values. CLI flags passed to `index run` override config file values where both apply.
 
 Unknown keys are errors in every section (top level, `geyser`, `store`,
-`serve`, `sinks`, `auth`, `grpc`). A misspelled `auth:` or `api_keys:` therefore
-stops startup and cannot turn API auth off.
+`serve`, `sinks`, `auth`, `grpc`, `clickhouse`). A misspelled `auth:` or
+`api_keys:` therefore stops startup and cannot turn API auth off.
 
 Validate before running:
 
@@ -14,36 +14,7 @@ cargo run -- config validate --file index.yaml
 
 ## Top-level structure
 
-```yaml
-geyser:
-  endpoint: ""
-  auth_token: ""
-  track_failed: false
-  track_tokens: false
-  accounts_include: []
-
-store:
-  url: "sqlite:./index.db"
-
-serve:
-  bind: "127.0.0.1:8080"
-
-programs:
-  - "./idls/pumpFun.json"
-
-wallets: []
-
-rpc_url: "https://api.mainnet-beta.solana.com"
-
-sinks:
-  - kind: stdout
-
-# Optional sections:
-# grpc:
-#   bind: "127.0.0.1:50051"
-# auth:
-#   api_keys: ["dev-key-change-me"]
-```
+For the full file with every section, see [`index.example.yaml`](../index.example.yaml).
 
 ---
 
@@ -56,9 +27,9 @@ Yellowstone geyser connection and subscription filters.
 | `endpoint` | string | `""` | Geyser gRPC URL. Required unless set via `YELLOWSTONE_ENDPOINT`. A `host:port` with no scheme means `https://`, unless the host is loopback (`localhost`, `127.0.0.1`, `[::1]`), which means `http://`. A remote plaintext endpoint needs an explicit `http://`. |
 | `auth_token` | string | `""` | Provider `x-token`. Override with `YELLOWSTONE_AUTH_TOKEN`. |
 | `track_failed` | bool | `false` | When `true`, include failed transactions in the geyser subscription and in RPC backfill. Their `program_ix` events carry `"failed": true`; their token-program instructions never become `token_transfer` events. Default excludes failed txs. |
-| `track_tokens` | bool | `false` | When `true`, subscribe to SPL Token and Token-2022 program traffic. **High volume** — enable only when you need token transfer events. |
+| `track_tokens` | bool | `false` | When `true`, subscribe to SPL Token and Token-2022 program traffic. **High volume**. Enable it only when you need token transfer events. |
 | `accounts_include` | string[] | `[]` | Additional account pubkeys passed to the geyser `account_include` filter. Program IDs from loaded IDLs are always included. |
-| `replay` | `auto` / `on` / `off` | `auto` | Whether to send `from_slot` on reconnect. `auto` calls `SubscribeReplayInfo` first (Richat often yes, many Triton gateways no). |
+| `replay` | `auto` / `on` / `off` | `auto` | Whether to send `from_slot` on start and on reconnect. `auto` calls `SubscribeReplayInfo` and sends `from_slot` only when the server reports a replay buffer. Check an endpoint with `index probe`. Some servers still reject `from_slot`: see the [runbook](./operations-runbook.md#cursor-semantics). |
 | `ping_secs` | u64 | `10` | Bidirectional subscribe ping so load balancers do not drop idle streams. `0` disables client pings. |
 | `compression` | `zstd` / `gzip` | `zstd` | Payload compression. `zstd` for Triton/Richat on `:443`. `gzip` is the original Yellowstone default. |
 
@@ -66,10 +37,12 @@ Yellowstone geyser connection and subscription filters.
 
 The geyser filter is built from:
 
-1. `wallets` (if non-empty) — wallet-centric filtering
-2. `geyser.accounts_include` — extra pubkeys
-3. Program IDs discovered from IDL files in `programs`
-4. Token programs — only when `track_tokens: true`
+1. `wallets` (if non-empty): wallet-centric filtering
+2. `geyser.accounts_include`: extra pubkeys
+3. Program IDs discovered from IDL files in `programs`, and from compiled parsers ([parsers/README.md](../parsers/README.md))
+4. Token programs: only when `track_tokens: true`
+
+The filter is the union of these lists. No list replaces another.
 
 Votes are always excluded. Failed transactions are included only when `track_failed: true`.
 
@@ -114,7 +87,7 @@ At least one IDL is recommended for program instruction decoding. Token transfer
 
 Only the first entry's **parent directory** is used: the router then loads every
 `*.json` in it. Listing one file out of a shared directory does not narrow the
-load — keep per-deployment IDL sets in separate directories.
+load. Keep per-deployment IDL sets in separate directories.
 
 Three IDL formats load:
 
@@ -134,7 +107,7 @@ bytes or with control or bidi characters, is skipped at load with the warning
 
 | Type | Default | Description |
 |------|---------|-------------|
-| `string[]` | `[]` | Wallet addresses for geyser `account_include`. When set, replaces the default token-program subscription (use `track_tokens` or `accounts_include` for additional coverage). Override with repeated `index run --wallet <ADDR>`. |
+| `string[]` | `[]` | Wallet addresses for geyser `account_include`. They are added to `accounts_include`, the IDL program ids and the token programs (when `track_tokens` is on). They replace nothing. Override with repeated `index run --wallet <ADDR>`. |
 
 ---
 
@@ -156,8 +129,8 @@ Each sink entry:
 |-------|------|----------|-------------|
 | `kind` | string | yes | `stdout` or `webhook` |
 | `url` | string | webhook only | HTTP POST target for webhook sinks |
-| `types` | string[] | no | Filter by event kind: `slot`, `token_transfer`, `program_ix`, `gap`, `idl_drift` |
-| `programs` | string[] | no | Filter by program name (IDL metadata name or token program id) |
+| `types` | string[] | no | Filter by event kind: `program_ix` or `token_transfer`. Sinks get only these two kinds, never `slot`, `gap` or `idl_drift` events |
+| `programs` | string[] | no | Filter by program name: an exact match on the IDL program name (for example `pumpFun`) or the token program id |
 | `instructions` | string[] | no | Filter `program_ix` events by instruction name (e.g. `buy`, `swap`) |
 
 ### Examples
@@ -169,7 +142,7 @@ sinks:
   - kind: webhook
     url: "https://hooks.example.com/events"
     types: ["program_ix"]
-    programs: ["pump"]
+    programs: ["pumpFun"]
     instructions: ["buy", "sell"]
 ```
 
@@ -216,15 +189,46 @@ Optional gRPC export for downstream consumers.
 
 Services (see `src/proto/index_export.proto`):
 
-- `StreamEvents` — live server-stream of parsed events
-- `GetEvents` — historical query. Fields: `limit`, `since_slot`, `kind`, `program`, `offset` (5), `until_slot` (6), `signature` (7). An `offset` above 10000, or a slot above `i64::MAX`, gives `InvalidArgument`.
+- `StreamEvents`: live server-stream of parsed events
+- `GetEvents`: historical query. Fields: `limit`, `since_slot`, `kind`, `program`, `offset` (5), `until_slot` (6), `signature` (7). An `offset` above 10000, or a slot above `i64::MAX`, gives `InvalidArgument`.
 
 With API keys set, every call needs the key in metadata: `x-api-key: <key>` or
 `authorization: Bearer <key>`. Otherwise the call fails with `Unauthenticated`.
 
-At most 256 `StreamEvents` streams per process (`RESOURCE_EXHAUSTED`) and 64
-streams per connection. Other limits are in the
-[runbook](./operations-runbook.md#server-limits).
+Stream and connection limits: [runbook](./operations-runbook.md#server-limits).
+
+---
+
+## `clickhouse`
+
+Optional copy of every finalized event in ClickHouse, for analytics over long
+ranges. SQLite or Postgres stays the main store: the cursor, gaps and the API
+read it.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `url` | string | none (required) | ClickHouse HTTP interface, for example `http://127.0.0.1:8123`. `http` or `https` only. |
+| `database` | string | `default` | Letters, digits and `_` only. The first character is a letter or `_`. |
+| `table` | string | `index_events` | Letters, digits and `_` only. The first character is a letter or `_`. The worker creates the table if it is missing. |
+| `user` | string | none | Sent as `X-ClickHouse-User`. |
+
+Set the password with `CLICKHOUSE_PASSWORD`. It has no YAML field, so it stays
+out of the config file.
+
+How it works:
+
+- When `clickhouse` is set, each new or changed event also gets a row in the
+  `ch_outbox` table, in the same transaction. A crash or a ClickHouse outage
+  loses nothing.
+- A worker sends outbox rows at or below the finalized slot, up to 1000 per
+  insert (`JSONEachRow`), and deletes them after ClickHouse accepts them. On an
+  error it retries after 0.5 s, doubling up to 30 s.
+- Fork events are deleted before the finalized cursor moves, so they are never
+  sent.
+- The table is a `ReplacingMergeTree(version)` ordered by
+  `(kind, signature, ix_path)`. A resent or changed event ends as one row after
+  merges. Use `FINAL` to read the merged result at once.
+- Only events stored after you turn it on are sent.
 
 ---
 
@@ -238,9 +242,10 @@ Environment variables are loaded from `.env` (via `dotenvy`) and override YAML v
 | `YELLOWSTONE_AUTH_TOKEN` | `geyser.auth_token` | |
 | `DATABASE_URL` | `store.url` | The env of `index run --db`, so it wins over YAML |
 | `SOLANA_RPC_URL` | `rpc_url` | Used by backfill and `parser fetch` / `parser watch` |
+| `CLICKHOUSE_PASSWORD` | none (env only) | Sent as `X-ClickHouse-Key` |
 | `INDEX_API_KEYS` | `auth.api_keys` | Comma-separated; replaces entire auth block. Empty counts as unset; a value with no key in it (for example `,`) is an error |
 
-No env overrides exist for `track_failed`, `track_tokens`, `accounts_include`, `sinks`, `grpc`, or `programs` — set those in YAML.
+No env overrides exist for `track_failed`, `track_tokens`, `accounts_include`, `sinks`, `grpc`, or `programs`. Set those in YAML.
 
 ---
 
@@ -252,7 +257,7 @@ when its value equals the default. YAML wins only over a flag that was not given
 | Flag | Overrides |
 |------|-----------|
 | `--config FILE` | Load base config from YAML |
-| `--endpoint` | `geyser.endpoint` |
+| `--endpoint` | `geyser.endpoint`. Prefer `YELLOWSTONE_ENDPOINT` when the URL holds a key: arguments are visible in `ps` |
 | `--auth-token` | `geyser.auth_token`. Prefer `YELLOWSTONE_AUTH_TOKEN`: arguments are visible in `ps` |
 | `--db` | `store.url` (default `sqlite:./index.db`) |
 | `--bind` | `serve.bind` (default `127.0.0.1:8080`) |

@@ -6,8 +6,8 @@ Day-two operations for the typed-event indexer: cursor semantics, gap repair, ID
 
 The indexer persists a **dual cursor** in the `cursors` table (id `1`):
 
-- `slot` — highest **confirmed** slot
-- `finalized_slot` — highest **finalized** slot that survived fork rollback
+- `slot`: highest **confirmed** slot
+- `finalized_slot`: highest **finalized** slot that survived fork rollback
 
 Confirmed slot updates advance `slot` and run gap detection. Finalized slot updates walk the parent chain and **delete events from orphaned slots** (slots we indexed that are not ancestors of the new finalized tip). If the parent chain is incomplete, nothing is deleted. A dead slot only logs `dead slot`: the stream is at confirmed commitment, so it has no events, and its slot row is removed as an orphan at finalization.
 
@@ -16,14 +16,14 @@ the last confirmed slot is skipped with a warning, as corrupt data. After 32
 such confirmed slots in a row, the jump is accepted (a long outage moves the
 tip that far too) and the missing range is recorded as a gap.
 
-**Resume on restart:** When `index run` starts, it loads the confirmed cursor and sets geyser `from_slot` to that slot (log field `resume_slot`). The slot is replayed, and the replay is idempotent (see below).
+**Resume on restart:** When `index run` starts, it loads the confirmed cursor (log field `resume_slot`). If [`replay`](./config-reference.md#geyser) allows it, the cursor slot goes to geyser as `from_slot`, and that slot is replayed. The replay is idempotent (see below). If not, the stream starts at the tip, and the down time becomes a gap.
 
 ```bash
 curl http://127.0.0.1:8080/cursor
 # {"slot": 285001234, "finalized_slot": 285001200, "updated_at": "..."}
 ```
 
-The ingest loop also keeps an in-memory atomic slot for reconnect: if the geyser stream drops, the client reconnects from the last committed confirmed slot rather than replaying from genesis.
+The ingest loop also keeps the last committed confirmed slot in memory. When the geyser stream drops, the client reconnects with that slot as `from_slot`, under the same `replay` rule.
 
 **Triton / Richat:** both speak Yellowstone `geyser.Geyser/Subscribe`. Before relying on `from_slot`, run:
 
@@ -31,21 +31,20 @@ The ingest loop also keeps an in-memory atomic slot for reconnect: if the geyser
 cargo run -- probe   # reads YELLOWSTONE_ENDPOINT and YELLOWSTONE_AUTH_TOKEN from the env or .env
 ```
 
-Do not pass the token (or an endpoint URL that holds a key) as `--auth-token` /
-`--endpoint`: command-line arguments are visible to other users in `ps`.
+Do not pass secrets as flags: see [CLI overrides](./config-reference.md#cli-overrides-index-run).
 
 Richat (seen on 14.1.1) accepts `from_slot` only at `processed` commitment. The
 indexer subscribes at `confirmed`, so Richat rejects the replay
 (`from_slot rejected; resubscribing from tip`). The indexer then starts at the
-tip and records the down time as a gap. Backfill repairs the gap over `rpc_url`,
-so use a fast RPC with Richat. The public RPC repairs about 1 slot per second.
+tip and records the down time as a gap. Backfill repairs the gap over `rpc_url`.
+For RPC speed, see [Backfill load](#backfill-load).
 
 Live check of an endpoint: set `YELLOWSTONE_ENDPOINT` and `YELLOWSTONE_AUTH_TOKEN`,
 then run `cargo test --release live_geyser -- --ignored --nocapture`. The test
 reads 20 confirmed slots with token transfers, then replays from 50 slots back.
 Official Yellowstone (Triton) passes. Richat fails at the replay step.
 
-`replay: auto` (default) omits `from_slot` when `SubscribeReplayInfo` is missing. The client accepts `zstd` (default) or `gzip`, sends subscribe pings every `ping_secs`, and answers server pings. Use `http://127.0.0.1:10000` for a local yellowstone/richat; `https://…` for hosted Triton/Richat. A `host:port` with no scheme means `https://` unless the host is loopback, so a remote plaintext endpoint needs an explicit `http://`.
+Client settings (`endpoint` scheme, `replay`, `ping_secs`, `compression`): see [`geyser`](./config-reference.md#geyser). The client also answers server pings.
 
 **Idempotency:** Events upsert on `(signature, ix_path, kind)`. `ix_path` is a CPI path (`0`, `0.1`, `0.1.2`), stable across geyser and RPC backfill. Replaying the same instruction updates the payload if it changed and does not insert a duplicate row.
 
@@ -94,7 +93,7 @@ The backfill worker:
    with a warning. A "skipped" answer for the last slot of a gap is retried;
    the third such answer closes it as skipped
 
-Use a reliable, rate-limit-aware RPC provider for production backfill. Public mainnet endpoints may throttle heavy gap repair.
+For RPC choice, see [Backfill load](#backfill-load).
 
 ### Monitoring gaps
 
@@ -104,7 +103,7 @@ Use a reliable, rate-limit-aware RPC provider for production backfill. Public ma
 | Gap events | WebSocket `/stream`, `GET /events?type=gap` |
 | Prometheus | `indexer_open_gaps` gauge on `/metrics` |
 
-Investigate sustained non-zero `open_gaps` — usually geyser disconnects, provider lag, or RPC backfill failures.
+Investigate sustained non-zero `open_gaps`. The usual causes are geyser disconnects, provider lag, or RPC backfill failures.
 
 ---
 
@@ -124,9 +123,10 @@ is updated in place. The write goes to a temp file first, then a rename.
 
 The gate:
 
-- **Breaking** changes block install (exit non-zero)
-- **Dangerous** changes are reported; review before `--force`
-- **Additive** / **cosmetic** changes are allowed
+- **Breaking** changes block the install (exit non-zero), unless you pass `--force`
+- **Dangerous** changes install, and the command prints them. Review them
+- **Additive** and **cosmetic** changes install
+- Reachable unmapped (`Generic`) fields block the install, unless you pass `--force`
 
 ### Diffing IDLs
 
@@ -148,11 +148,11 @@ zlib-decompresses it, and installs it through the same idl-drift gate as
 
 Pre-0.30 Anchor IDLs lack two things the router needs:
 
-- **`address`** — the router keys programs by it. Fetch always sets it to the
+- **`address`**: the router keys programs by it. Fetch always sets it to the
   `--program-id` you passed, also when the IDL names another address (Codama
   documents: `program.publicKey`). The IDL account is derived from that
   program id, so an address inside the IDL is not trusted.
-- **instruction discriminators** — derived when the IDL is parsed, as
+- **instruction discriminators**: derived when the IDL is parsed, as
   `sha256("global:" + snake_case(name))[..8]`, the same value Anchor computes
   from the Rust fn name. Explicit discriminators (Anchor 0.30+) are never
   overwritten.
@@ -179,7 +179,7 @@ cargo run -- parser watch --interval 300
 - Auto-updates local files on dangerous-only drift
 - Breaking drift requires `--force` to overwrite
 
-Run `parser watch` as a sidecar or cron job in production. After an IDL update, restart the indexer to reload parsers (or rely on a future hot-reload if added).
+Run `parser watch` as a sidecar or cron job in production. After an IDL update, restart the indexer to reload parsers.
 
 ---
 
@@ -188,7 +188,7 @@ Run `parser watch` as a sidecar or cron job in production. After an IDL update, 
 | Endpoint | Auth | Description |
 |----------|------|-------------|
 | `GET /health` | Public, no key | `{"ok": true, "slot", "finalized_slot", "events_total", "open_gaps"}` |
-| `GET /stats` | API key if configured | Live counters: `slot`, `events_total`, `token_transfers`, `program_ix`, `open_gaps`, `lag_slots` |
+| `GET /stats` | API key if configured | Live counters: `slot`, `finalized_slot`, `events_total`, `token_transfers`, `program_ix`, `open_gaps`, `lag_slots` |
 | `GET /metrics` | Public, no key | Prometheus text exposition |
 
 `/health` and `/metrics` never need an API key, so they show slot progress, the
@@ -260,7 +260,7 @@ scrape_configs:
 | Wrong network IDL | Match IDL program id to chain (mainnet vs devnet) |
 | Program not in subscription | Ensure program id appears in loaded IDL router |
 | IDL file skipped at load | The log shows `skip IDL file` (empty or invalid `address`, or a second IDL for the same address). Re-fetch so the program id is stamped in. |
-| Filter matches, but no events for a busy program | Some programs (observed with Drift and marginfi) yield nothing over minutes while others on the same subscription flow normally. Both are ALT-heavy — whether `account_include` resolves lookup-table addresses is up to the provider's geyser build, so confirm with your provider and try adding specific accounts to `accounts_include`. |
+| Filter matches, but no events for a busy program | Some programs (seen with Drift and marginfi) yield nothing for minutes, while others on the same subscription flow normally. Both use many address lookup tables (ALTs). The provider's geyser build decides if `account_include` matches ALT addresses. Ask your provider, and try to add specific accounts to `accounts_include`. |
 
 ### IDL fails to parse
 
@@ -288,7 +288,7 @@ A `400` on `/events` is a bad query, not a store fault: `offset` above 10000, or
 
 1. Check disk space (SQLite) or Postgres connectivity
 2. Verify `DATABASE_URL` / `store.url`. Only `sqlite:`, a file path, and `postgres://` / `postgresql://` are accepted; `mysql://` and other schemes stop startup
-3. For Postgres, ensure migrations ran (tables `events`, `cursors`, `gaps`, `slots`)
+3. For Postgres, ensure migrations ran (tables `events`, `cursors`, `gaps`, `slots`, `ch_outbox`)
 
 Migrations in `migrations/<backend>/` run at startup, including on an existing
 database, so a stopped indexer picks up new ones on its next boot. Check what
@@ -359,7 +359,7 @@ must match `Host` or `X-Forwarded-Host`.
 
 ### Token traffic volume
 
-`track_tokens: true` subscribes to SPL Token and Token-2022 programs. Mainnet token activity is **very high** — expect large event volume, higher CPU, and faster DB growth.
+`track_tokens: true` subscribes to SPL Token and Token-2022 programs. Mainnet token activity is **very high**. Expect large event volume, higher CPU, and faster DB growth.
 
 **Recommendations:**
 
@@ -388,11 +388,10 @@ index, so a filtered query seeks instead of scanning:
 | `signature` | `UNIQUE (signature, ix_path, kind)` |
 | `since_slot` / `until_slot` | `events_slot_idx (slot)` |
 
-`id` trails `kind` and `program` because every query ends in `ORDER BY id ASC` —
-the planner walks the index already ordered and skips the sort. Without them a
+`id` trails `kind` and `program` because every query ends in `ORDER BY id ASC`.
+The planner walks the index already ordered and skips the sort. Without them a
 `program =` filter scanned the whole table: 1.48s at 586k rows, versus under
-10ms with. The indexes cost roughly 9% on disk (+48 MB at 586k rows), which is
-worth it for any store that gets queried.
+10ms with them. The indexes add about 9% on disk (48 MB at 586k rows).
 
 ### Server limits
 
@@ -413,6 +412,26 @@ worth it for any store that gets queried.
 | gRPC request timeout | 30s, to response headers only | Open `StreamEvents` streams are not cut |
 | gRPC HTTP/2 keepalive ping | every 30s | A connection that does not answer is closed |
 
+### ClickHouse sink
+
+With a `clickhouse` section, the log shows `clickhouse sink on` at start. A
+failed send logs `clickhouse sink failed; rows stay in the outbox` and retries.
+
+Rows waiting for ClickHouse:
+
+```bash
+sqlite3 index.db "SELECT count(*), min(slot), max(slot) FROM ch_outbox;"
+```
+
+A count that only grows means ClickHouse rejects the inserts or cannot be
+reached. Rows above the finalized slot wait by design.
+
+Read the merged rows (one row per event):
+
+```sql
+SELECT kind, count() FROM index_events FINAL GROUP BY kind;
+```
+
 ### Data checks
 
 - A transaction whose signature is not 64 bytes is dropped. An instruction
@@ -429,17 +448,18 @@ worth it for any store that gets queried.
 
 ### Backfill load
 
-Large gap ranges trigger sequential `getBlock` RPC calls, 1000 slots per chunk. A provider rate limit during backfill leaves `open_gaps` elevated. Use a dedicated RPC key with higher limits for repair workloads.
+Large gap ranges trigger sequential `getBlock` RPC calls, 1000 slots per chunk. The public mainnet RPC repairs about 1 slot per second and can throttle heavy repair. A provider rate limit leaves `open_gaps` high. For repair, use a fast RPC with a dedicated key and higher limits.
 
 ---
 
 ## Upgrading from an older version
 
-- Each start resumes at the cursor slot and replays it. For current rows the
-  replay changes nothing. Rows from before the upgrade carry `ix_path`
-  `legacy:N` (migration 005), so they do not match the new paths: on the first
-  start after the upgrade, the replay stores new-format copies of that one
-  slot next to its legacy rows, and sinks and `/stream` get those events again.
+- Each start resumes at the cursor slot and replays it, when `replay` allows
+  it. For current rows the replay changes nothing. Rows from before the upgrade
+  carry `ix_path` `legacy:N` (migration 005), so they do not match the new
+  paths. On the first start after the upgrade, the replay stores new-format
+  copies of that one slot next to its legacy rows. Sinks and `/stream` get
+  those events again.
 - Rows stored with `track_failed: true` before the upgrade have no `failed`
   marker, so an old failed-transaction row reads as `"failed": false`.
 
@@ -451,7 +471,7 @@ Large gap ranges trigger sequential `getBlock` RPC calls, 1000 slots per chunk. 
 # Validate config
 cargo run -- config validate
 
-# Read-only demo from existing DB
+# Demo from an existing DB (no geyser; not read-only)
 cargo run -- demo --db sqlite:./index.db
 
 # Terminal live view (logs go to ./index.log)

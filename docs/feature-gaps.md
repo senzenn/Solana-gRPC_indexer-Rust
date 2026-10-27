@@ -2,9 +2,9 @@
 
 Feature gaps only. Not repo hygiene.
 
-Sourced from this repo's README **What works** list plus the command / HTTP / gRPC tables, then checked against `src/pipeline/`. Each gap is mapped to what already exists in local shipstern (`~/oss/vixen/shipstern`, upstream `solana-rpc/shipstern`).
+Sourced from this repo's README **What works** list plus the command / HTTP / gRPC tables, then checked against `src/pipeline/`. Each gap is mapped to what already exists in upstream shipstern (`solana-rpc/shipstern`).
 
-The geyser → decode → store → serve pipeline is the product. Shipstern is the parser/runtime/sink library. Steal parsers, CPI trees, handlers, and Kafka. Do not vendor the framework. Keep this repo the one-binary shell: cursor, gaps, typed store, HTTP/WS, TUI.
+The geyser -> decode -> store -> serve pipeline is the product. Shipstern is the parser/runtime/sink library. Steal parsers, CPI trees, handlers, and Kafka. Do not vendor the framework. Keep this repo the one-binary shell: cursor, gaps, typed store, HTTP/WS, TUI.
 
 ## What already works (verified)
 
@@ -12,7 +12,7 @@ The geyser → decode → store → serve pipeline is the product. Shipstern is 
 |-------|-------|
 | Anchor IDL decode (name, args, named accounts) | `src/pipeline/idl.rs` (`IdlRouter`, 8-byte discriminator) |
 | Codama `rootNode` IDLs (what `pumpFun.json` is) | `vendor/idl-drift/src/codama_convert.rs` |
-| Pre-0.30 Anchor IDLs (no `address`, no discriminators) | `idl_fetch.rs` stamps the id, `model.rs` derives `sha256("global:<fn>")[..8]` |
+| Pre-0.30 Anchor IDLs (no `address`, no discriminators), from `parser fetch` / `parser watch` | `idl_fetch.rs` stamps the id, `model.rs` derives `sha256("global:<fn>")[..8]` |
 | Borsh scalars incl. `f32` / `f64` | `model.rs` `Type`, `src/pipeline/decode_args.rs` |
 | `/events` filter indexes on `kind` / `program` | `migrations/*/003_events_filter_indexes.sql` |
 | Opt-in SPL Token / Token-2022 **transfers only** | `src/pipeline/token.rs` (`TRANSFER` / `TRANSFER_CHECKED`) |
@@ -22,29 +22,29 @@ The geyser → decode → store → serve pipeline is the product. Shipstern is 
 | Store unique key | `UNIQUE(signature, ix_path, kind)` in `migrations/*/002_ix_path_and_finalized.sql` |
 | Webhook + stdout sinks with kind/program/ix routing | `src/pipeline/sink.rs` (`EventSink` trait, two impls) |
 | SQLite or Postgres | `EventStore` |
+| ClickHouse copy of finalized events through a durable outbox | `src/pipeline/clickhouse.rs`, `migrations/*/006_clickhouse_outbox.sql` |
 | Prometheus `/metrics` | `src/pipeline/metrics.rs` |
 | REST `/events` + WS `/stream` + gRPC export | `serve.rs`, `grpc_export.rs` |
-| `parser fetch` / `parser watch` (Anchor on-chain IDL, incl. pre-0.30) | `idl_fetch.rs` (stamps `address`), `model.rs` (derives `sha256("global:<fn>")[..8]`) |
 | Commitment | `Confirmed` only (`ingest.rs` `SubscribeRequest`) |
 
 ## Steal map
 
-| Gap in this indexer | Shipstern already has | Local path |
-|---------------------|-----------------------|------------|
+| Gap in this indexer | Shipstern already has | Shipstern path |
+|---------------------|-----------------------|----------------|
 | Native / SPL / Token-2022 program decoders | Built-in `AccountParser` + `InstructionParser` | `crates/spl-token-parser`, `crates/spl-token-extensions-parser` |
 | BPF loader / stake pool | Built-in parsers | `crates/bpf-loader-parser`, `crates/stake-pool-parser` |
 | Non-Anchor programs with no IDL | `include_shipstern_parser!("idl.json")`. Done: `parsers/` + `src/pipeline/compiled.rs` (instructions only, no `AccountParser` or `program-events` yet) | `crates/proc-macro` |
 | Metaplex | Fixture IDL + generated parser tests | `tests/idls/metaplex.json`, `tests/proc-macro/tests/metaplex.rs` |
 | CPI tree + instruction path | `InstructionUpdate.inner` + `Path` | `crates/core/src/instruction.rs` |
 | `emit!` / program logs | Log attribution onto each ix | `crates/core/src/log_messages.rs`, `tests/proc-macro-events` |
-| Account-state decode | `Runtime::account(Pipeline::new(AccountParser, …))` | every parser crate + `examples/idl-parser` |
+| Account-state decode | `Runtime::account(Pipeline::new(AccountParser, ...))` | every parser crate + `examples/idl-parser` |
 | Pluggable handlers / custom sinks | `Handler<T, R>` on `Pipeline` | `crates/runtime/src/handler.rs` |
 | Kafka / schema registry | `shipstern-kafka-sink` | `crates/kafka-sink` |
 | Slot/block commit ordering | `BlockMachineCoordinator` over `yellowstone_block_machine` | `crates/block-coordinator` |
 | Prometheus scrape compose | `docker-compose.yaml` + `prometheus-config.yaml` | repo root; `examples/prometheus` |
 | Alternate sources (fumarole, jetstreamer, snapshot) | official source crates | `crates/*-source` |
 
-Do not copy shipstern's lack of a queryable event store. That is this product's edge.
+Shipstern has no queryable event store. Keep the store here: it is the main difference from shipstern.
 
 ---
 
@@ -120,7 +120,7 @@ Missing: Kafka / NATS / Redis streams, S3/parquet, a first-class way to register
 
 - `/metrics` is exported. Compose does not run Prometheus or Grafana. Shipstern's `docker-compose.yaml` runs Prometheus + pushgateway; still no Grafana dashboards or alert rules there either. Add a scrape job and a small dashboard (lag, decode errors, sink failures, gap count).
 - Single process. No shard-by-program, no slot-range workers, no coordinated backfill.
-- Ingest channel is `mpsc` 4096. Sinks run off the ingest loop on a bounded queue (1024); when it is full, live and backfilled events skip the sinks (they are still stored) and a warning is logged. `indexer_lag_slots` exists.
+- Ingest channel is `mpsc` 4096. Sinks run off the ingest loop on a bounded queue (1024). When the queue is full, live and backfilled events skip the sinks but are still stored, and a warning is logged. `indexer_lag_slots` exists.
 
 Still missing: a `sink_queue_depth` gauge and a sink-drop counter.
 
@@ -139,20 +139,20 @@ Generate OpenAPI from the Axum routes (or a hand-written spec next to the proto)
 
 ## Prioritized roadmap
 
-Biggest levers: decoding breadth, reorg-safe correctness, more sinks.
+Priority order: reorg-safe correctness (P0), then decoding breadth (P1), then more sinks (P2).
 
 | P | Item | Why first | Shipstern borrow |
 |---|------|-----------|------------------|
 | P0 | Path-based ix identity + upsert | Done: `ix_path` unique key, CPI stack-height paths | `Path` on `InstructionUpdate` |
 | P0 | Finalized cursor + orphan rollback | Done: dual cursor, parent walk, delete orphans | `block-coordinator` / commit-at |
 | P1 | `ProgramEvent` + log/`emit!` decode | Most useful protocol data | `log_messages.rs`, proc-macro-events |
-| P1 | Keep CPI tree (path + parent) | Unlocks P0 + events | `inner` + `Path` |
+| P1 | Keep CPI tree (path + parent) | Done in part: `ix_path` holds the path, and the parent is its prefix. Log ranges per instruction are missing | `inner` + `Path` + `log_range` |
 | P1 | Full Token + Token-2022 parsers | `track_tokens` is transfer-only | `spl-token-parser`, `spl-token-extensions-parser` |
 | P1 | Account snapshot decode | Filters already exist | `AccountParser` |
 | P2 | Kafka sink + public `EventSink` | Downstream consumers | `kafka-sink`, `Handler` |
 | P2 | Built-in System / BPF loader / Metaplex | Non-Anchor coverage | bpf-loader parser, Codama macro |
 | P3 | Prometheus compose + Grafana lag dashboard | Ops | shipstern compose (extend with Grafana) |
-| P3 | Bounded ingest/sink queues + lag gauges | Backpressure | runtime metrics counters |
+| P3 | Bounded ingest/sink queues + lag gauges | Done in part: ingest queue 4096, sink queue 1024, `indexer_lag_slots`. A `sink_queue_depth` gauge and a sink-drop counter are missing | runtime metrics counters |
 | P4 | OpenAPI + proto-generated TS client | DX | none; this is the product shell |
 | P5 | Typed/gold tables or GraphQL | Query power users | none; bronze JSON stays |
 | P5 | Horizontal shard / multi-worker backfill | Scale | fumarole / jetstreamer sources if needed |

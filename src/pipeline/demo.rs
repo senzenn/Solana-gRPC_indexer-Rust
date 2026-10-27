@@ -22,7 +22,8 @@ pub async fn run_demo(db: String, bind: SocketAddr, api_keys: Vec<String>) -> Re
     }));
 
     let open_gaps = store.open_gap_count().await.unwrap_or(0);
-    if let Ok(recent) = store.recent_events(200).await {
+    let recent = store.recent_events(200).await.unwrap_or_default();
+    {
         let mut st = stats.write().await;
         st.events_total = recent.len() as u64;
         st.open_gaps = open_gaps;
@@ -33,11 +34,6 @@ pub async fn run_demo(db: String, bind: SocketAddr, api_keys: Vec<String>) -> Re
                 _ => {}
             }
         }
-        st.lag_slots = st.slot.saturating_sub(st.finalized_slot);
-        prom::update_live_stats(st.slot, st.finalized_slot, st.lag_slots, st.open_gaps);
-    } else {
-        let mut st = stats.write().await;
-        st.open_gaps = open_gaps;
         st.lag_slots = st.slot.saturating_sub(st.finalized_slot);
         prom::update_live_stats(st.slot, st.finalized_slot, st.lag_slots, st.open_gaps);
     }

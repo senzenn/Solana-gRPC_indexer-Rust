@@ -25,6 +25,51 @@ pub struct IndexConfig {
     pub rpc_url: Option<String>,
     pub auth: Option<AuthConfig>,
     pub grpc: Option<GrpcConfig>,
+    pub clickhouse: Option<ClickHouseConfig>,
+}
+
+/// Copy finalized events to ClickHouse. The password comes only from
+/// CLICKHOUSE_PASSWORD, so it stays out of the config file.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ClickHouseConfig {
+    /// HTTP interface, for example http://127.0.0.1:8123.
+    pub url: String,
+    #[serde(default = "default_ch_database")]
+    pub database: String,
+    #[serde(default = "default_ch_table")]
+    pub table: String,
+    #[serde(default)]
+    pub user: Option<String>,
+}
+
+fn default_ch_database() -> String {
+    "default".to_string()
+}
+
+fn default_ch_table() -> String {
+    "index_events".to_string()
+}
+
+impl ClickHouseConfig {
+    /// The names go into SQL text, so allow only plain identifiers.
+    pub fn validate(&self) -> Result<()> {
+        let url = url::Url::parse(&self.url).context("clickhouse.url is not a valid URL")?;
+        if !matches!(url.scheme(), "http" | "https") {
+            bail!("clickhouse.url must use http or https");
+        }
+        for (field, name) in [("database", &self.database), ("table", &self.table)] {
+            let mut chars = name.chars();
+            let ok = chars
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                && chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
+            if !ok {
+                bail!("clickhouse.{field} must be letters, digits or _: {name:?}");
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -78,8 +123,10 @@ pub struct GeyserConfig {
     pub compression: CompressionKind,
 }
 
+pub const DEFAULT_PING_SECS: u64 = 10;
+
 fn default_ping_secs() -> u64 {
-    10
+    DEFAULT_PING_SECS
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -89,8 +136,10 @@ pub struct StoreConfig {
     pub url: String,
 }
 
+pub const DEFAULT_STORE_URL: &str = "sqlite:./index.db";
+
 fn default_store_url() -> String {
-    "sqlite:./index.db".to_string()
+    DEFAULT_STORE_URL.to_string()
 }
 
 impl Default for StoreConfig {
@@ -108,8 +157,11 @@ pub struct ServeConfig {
     pub bind: String,
 }
 
+/// Loopback default: protected routes are open when no API key is set.
+pub const DEFAULT_BIND: &str = "127.0.0.1:8080";
+
 fn default_bind() -> String {
-    "127.0.0.1:8080".to_string()
+    DEFAULT_BIND.to_string()
 }
 
 impl Default for ServeConfig {
@@ -168,6 +220,14 @@ pub fn parse_api_keys(raw: &str) -> Result<Option<Vec<String>>> {
     Ok(Some(keys))
 }
 
+/// Keys from `INDEX_API_KEYS`. Unset gives no keys.
+pub fn env_api_keys(env: impl Fn(&str) -> Option<String>) -> Result<Vec<String>> {
+    match env("INDEX_API_KEYS") {
+        Some(raw) => Ok(parse_api_keys(&raw)?.unwrap_or_default()),
+        None => Ok(Vec::new()),
+    }
+}
+
 /// Read an env var. An empty or blank value counts as unset.
 pub fn env_var(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|v| !v.trim().is_empty())
@@ -209,30 +269,6 @@ pub fn merge_with(
     Ok(cfg)
 }
 
-#[allow(dead_code)]
-pub fn default_config() -> IndexConfig {
-    IndexConfig {
-        geyser: GeyserConfig {
-            endpoint: String::new(),
-            auth_token: String::new(),
-            track_failed: false,
-            track_tokens: false,
-            accounts_include: Vec::new(),
-            replay: ReplayMode::Auto,
-            ping_secs: default_ping_secs(),
-            compression: CompressionKind::Zstd,
-        },
-        store: StoreConfig::default(),
-        serve: ServeConfig::default(),
-        programs: vec![PathBuf::from("./idls/pumpFun.json")],
-        wallets: Vec::new(),
-        sinks: Vec::new(),
-        rpc_url: None,
-        auth: None,
-        grpc: None,
-    }
-}
-
 impl IndexConfig {
     pub fn validate(&self) -> Result<()> {
         if self.geyser.endpoint.trim().is_empty() {
@@ -252,7 +288,10 @@ impl IndexConfig {
         if let Some(auth) = &self.auth {
             auth.keys()?;
         }
-        super::sink::build_sinks(&self.sinks).context("invalid sinks config")?;
+        super::sink::validate_sinks(&self.sinks).context("invalid sinks config")?;
+        if let Some(clickhouse) = &self.clickhouse {
+            clickhouse.validate()?;
+        }
         Ok(())
     }
 }
@@ -260,6 +299,30 @@ impl IndexConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn default_config() -> IndexConfig {
+        IndexConfig {
+            geyser: GeyserConfig {
+                endpoint: String::new(),
+                auth_token: String::new(),
+                track_failed: false,
+                track_tokens: false,
+                accounts_include: Vec::new(),
+                replay: ReplayMode::Auto,
+                ping_secs: default_ping_secs(),
+                compression: CompressionKind::Zstd,
+            },
+            store: StoreConfig::default(),
+            serve: ServeConfig::default(),
+            programs: vec![PathBuf::from("./idls/pumpFun.json")],
+            wallets: Vec::new(),
+            sinks: Vec::new(),
+            rpc_url: None,
+            auth: None,
+            grpc: None,
+            clickhouse: None,
+        }
+    }
 
     #[test]
     fn parses_index_example_yaml() {
@@ -296,17 +359,8 @@ mod tests {
 
     #[test]
     fn default_config_matches_run_defaults() {
-        let cfg = default_config();
-        assert_eq!(cfg.store.url, "sqlite:./index.db");
-        assert_eq!(cfg.serve.bind, "127.0.0.1:8080");
-        assert_eq!(cfg.geyser.auth_token, "");
-        assert!(!cfg.geyser.track_failed);
-        assert!(!cfg.geyser.track_tokens);
-        assert!(cfg.geyser.accounts_include.is_empty());
-        assert!(cfg.wallets.is_empty());
-        assert!(cfg.sinks.is_empty());
-        assert!(cfg.rpc_url.is_none());
-        assert!(cfg.auth.is_none());
+        assert_eq!(StoreConfig::default().url, "sqlite:./index.db");
+        assert_eq!(ServeConfig::default().bind, "127.0.0.1:8080");
     }
 
     #[test]
@@ -394,7 +448,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_rejects_bad_sink_and_grpc_bind() {
+    fn validate_rejects_bad_sink_grpc_bind_and_clickhouse_name() {
         let mut cfg = yaml_config();
         cfg.grpc = Some(GrpcConfig {
             bind: "localhost:50051".into(),
@@ -409,6 +463,16 @@ mod tests {
             programs: None,
             instructions: None,
         }];
+        assert!(cfg.validate().is_err());
+
+        // The table name goes into SQL text.
+        let mut cfg = yaml_config();
+        cfg.clickhouse = Some(ClickHouseConfig {
+            url: "http://127.0.0.1:8123".into(),
+            database: "default".into(),
+            table: "events; DROP TABLE x".into(),
+            user: None,
+        });
         assert!(cfg.validate().is_err());
     }
 }

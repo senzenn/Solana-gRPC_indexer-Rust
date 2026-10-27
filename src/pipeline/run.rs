@@ -51,10 +51,15 @@ pub struct RunArgs {
     pub replay: super::config_file::ReplayMode,
     pub ping_secs: u64,
     pub compression: super::config_file::CompressionKind,
+    pub clickhouse: Option<super::config_file::ClickHouseConfig>,
 }
 
 pub async fn run(args: RunArgs) -> Result<()> {
-    let store = Arc::new(EventStore::open(&args.db).await?);
+    let mut store = EventStore::open(&args.db).await?;
+    if args.clickhouse.is_some() {
+        store.enable_outbox();
+    }
+    let store = Arc::new(store);
     let cursor = store.load_cursor().await?;
     // Ingest resumes at the cursor slot itself and replays it; writes are idempotent.
     let from_slot = cursor.as_ref().map(|c| c.slot).filter(|slot| *slot > 0);
@@ -139,6 +144,12 @@ pub async fn run(args: RunArgs) -> Result<()> {
         None
     };
 
+    if let Some(cfg) = args.clickhouse.clone() {
+        let password = super::config_file::env_var("CLICKHOUSE_PASSWORD");
+        let worker = super::clickhouse::ClickHouseWorker::new(cfg, password, store.clone())?;
+        tasks.spawn(async move { ("clickhouse", worker.run().await) });
+    }
+
     let http_state = AppState {
         events: bus.clone(),
         stats: stats.clone(),
@@ -162,7 +173,6 @@ pub async fn run(args: RunArgs) -> Result<()> {
                 super::grpc_export::serve(grpc_bind, export, keys).await,
             )
         });
-        info!(%grpc_bind, "gRPC export listening");
     }
 
     if args.tui {
@@ -476,7 +486,7 @@ fn sinks_for_mode(sinks: Vec<SinkConfig>, tui: bool) -> Vec<SinkConfig> {
 /// Runs sinks off the ingest loop, so a slow webhook cannot stall indexing.
 async fn deliver_sinks(sinks: SinkFanout, mut rx: mpsc::Receiver<IndexEvent>) {
     while let Some(event) = rx.recv().await {
-        let _ = sinks.send(&event).await;
+        sinks.send(&event).await;
     }
 }
 
@@ -516,7 +526,7 @@ async fn emit_gap(
         to_slot: to,
     };
     store.record_gap(from, to).await?;
-    let _ = store.write_event(&event).await;
+    store.write_event(&event).await?;
     let _ = bus.send(event);
     // Do not wait on the backfill queue: the gap row is stored and ingest must not stall.
     if let Some(gap_tx) = gap_tx
@@ -536,7 +546,7 @@ async fn emit_gap(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pipeline::testutil::TempDb;
+    use crate::pipeline::testutil::{TempDb, spl_transfer_ix};
     use std::time::Duration;
 
     #[test]
@@ -626,19 +636,7 @@ mod tests {
     }
 
     fn transfer_at(slot: u64) -> IngestMsg {
-        use crate::pipeline::event::{RawInstruction, TOKEN_PROGRAM};
-        use crate::pipeline::ix_path::IxPath;
-        let mut data = vec![3u8]; // SPL Token transfer
-        data.extend_from_slice(&1_000u64.to_le_bytes());
-        IngestMsg::Instructions(vec![RawInstruction {
-            slot,
-            signature: format!("sig-{slot}"),
-            path: IxPath::root(0),
-            program_id: TOKEN_PROGRAM.into(),
-            accounts: vec!["src".into(), "dst".into(), "auth".into()],
-            data,
-            failed: false,
-        }])
+        IngestMsg::Instructions(vec![spl_transfer_ix(slot)])
     }
 
     fn slot_msg(slot: u64, parent: Option<u64>, status: SlotCommitment) -> IngestMsg {

@@ -1,7 +1,7 @@
 //! Yellowstone gRPC connect helpers for Triton Dragon's Mouth and Richat.
 //!
 //! Both speak `geyser.Geyser/Subscribe`. Differences are TLS, compression,
-//! replay (`from_slot`), and idle pings — not a second protocol.
+//! replay (`from_slot`), and idle pings; not a second protocol.
 
 use std::time::Duration;
 
@@ -18,14 +18,8 @@ const HTTP2_KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
 const TCP_KEEPALIVE: Duration = Duration::from_secs(20);
 const MAX_DECODE_BYTES: usize = 64 * 1024 * 1024;
 
-/// Fill in a scheme so tonic's `Endpoint::from_shared` accepts provider URLs.
-///
-/// - `https://…` / `http://…` left alone
-/// - loopback host:port (local `127.0.0.1:10000`) → `http://`
-/// - any other host or host:port → `https://`
-///
-/// Providers also serve TLS on ports other than 443. A plaintext guess would
-/// send the x-token in clear text, so remote hosts need an explicit `http://`.
+/// Add a scheme for tonic. Only loopback gets http://: a guess for a remote host
+/// would send the x-token in clear text.
 pub fn normalize_endpoint(raw: &str) -> String {
     let trimmed = raw.trim();
     if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
@@ -53,12 +47,16 @@ fn is_loopback(endpoint: &str) -> bool {
     }
 }
 
-/// Scheme, host and port only. Providers often put the API key in the URL
-/// path or query, so log lines and reports must not show the full endpoint.
 pub fn endpoint_label(endpoint: &str) -> String {
-    let Ok(url) = url::Url::parse(endpoint) else {
-        return "<invalid endpoint>".to_string();
-    };
+    match url::Url::parse(endpoint) {
+        Ok(url) => url_label(&url),
+        Err(_) => "<invalid endpoint>".to_string(),
+    }
+}
+
+/// Scheme, host and port only. Providers often put the API key in the URL
+/// path or query, so log lines and reports must not show the full URL.
+pub fn url_label(url: &url::Url) -> String {
     let host = url.host_str().unwrap_or_default();
     match url.port() {
         Some(port) => format!("{}://{host}:{port}", url.scheme()),
@@ -95,16 +93,14 @@ pub struct ProbeReport {
     pub endpoint: String,
     pub version: Option<String>,
     pub replay_first_available: Option<u64>,
-    pub replay_supported: bool,
 }
 
 impl ProbeReport {
     pub fn summary(&self) -> String {
         let version = self.version.as_deref().unwrap_or("unknown");
-        let replay = match (self.replay_supported, self.replay_first_available) {
-            (true, Some(slot)) => format!("yes (first_available={slot})"),
-            (true, None) => "yes".into(),
-            (false, _) => "no — from_slot will be omitted".into(),
+        let replay = match self.replay_first_available {
+            Some(slot) => format!("yes (first_available={slot})"),
+            None => "no: from_slot will be omitted".into(),
         };
         format!(
             "geyser probe\n  endpoint: {}\n  version:  {version}\n  replay:   {replay}",
@@ -157,16 +153,11 @@ pub async fn connect(
     builder.connect().await.context("geyser connect")
 }
 
-/// `GetVersion` + `SubscribeReplayInfo`. Safe on Triton and Richat: missing
-/// replay RPCs just mean `from_slot` must stay off.
-pub async fn probe(
-    endpoint: &str,
-    auth_token: &str,
-    compression: CompressionKind,
-) -> Result<ProbeReport> {
-    let endpoint = normalize_endpoint(endpoint);
-    let mut client = connect(&endpoint, auth_token, compression).await?;
-
+/// `GetVersion` + `SubscribeReplayInfo`. Returns the server version and the first
+/// replay slot. Safe on Triton and Richat: missing replay RPCs mean no replay.
+pub async fn server_info<F: Interceptor>(
+    client: &mut GeyserGrpcClient<F>,
+) -> (Option<String>, Option<u64>) {
     let version = match client.get_version().await {
         Ok(resp) => {
             info!(version = %resp.version, "geyser GetVersion");
@@ -177,38 +168,45 @@ pub async fn probe(
             None
         }
     };
-
-    let (replay_supported, replay_first_available) = match client.subscribe_replay_info().await {
+    let first_available = match client.subscribe_replay_info().await {
         // Yellowstone answers Ok with no slot when its replay buffer is off.
         Ok(info) => {
             info!(first_available = ?info.first_available, "geyser replay info");
-            (info.first_available.is_some(), info.first_available)
+            info.first_available
         }
         Err(err) => {
             info!(error = %err, "geyser replay not advertised");
-            (false, None)
+            None
         }
     };
+    (version, first_available)
+}
 
+pub async fn probe(
+    endpoint: &str,
+    auth_token: &str,
+    compression: CompressionKind,
+) -> Result<ProbeReport> {
+    let endpoint = normalize_endpoint(endpoint);
+    let mut client = connect(&endpoint, auth_token, compression).await?;
+    let (version, replay_first_available) = server_info(&mut client).await;
     Ok(ProbeReport {
         endpoint: endpoint_label(&endpoint),
         version,
         replay_first_available,
-        replay_supported,
     })
 }
 
 pub fn resolve_from_slot(
     requested: Option<u64>,
     replay: ReplayMode,
-    replay_supported: bool,
     first_available: Option<u64>,
 ) -> Option<u64> {
     let want = match replay {
         ReplayMode::Off => return None,
         ReplayMode::On => requested,
         ReplayMode::Auto => {
-            if replay_supported {
+            if first_available.is_some() {
                 requested
             } else {
                 None
@@ -320,25 +318,13 @@ mod tests {
 
     #[test]
     fn resolve_from_slot_auto_requires_replay() {
+        assert_eq!(resolve_from_slot(Some(10), ReplayMode::Auto, None), None);
         assert_eq!(
-            resolve_from_slot(Some(10), ReplayMode::Auto, false, None),
-            None
-        );
-        assert_eq!(
-            resolve_from_slot(Some(10), ReplayMode::Auto, true, Some(5)),
+            resolve_from_slot(Some(10), ReplayMode::Auto, Some(5)),
             Some(10)
         );
-        assert_eq!(
-            resolve_from_slot(Some(3), ReplayMode::Auto, true, Some(5)),
-            None
-        );
-        assert_eq!(
-            resolve_from_slot(Some(10), ReplayMode::Off, true, Some(1)),
-            None
-        );
-        assert_eq!(
-            resolve_from_slot(Some(10), ReplayMode::On, false, None),
-            Some(10)
-        );
+        assert_eq!(resolve_from_slot(Some(3), ReplayMode::Auto, Some(5)), None);
+        assert_eq!(resolve_from_slot(Some(10), ReplayMode::Off, Some(1)), None);
+        assert_eq!(resolve_from_slot(Some(10), ReplayMode::On, None), Some(10));
     }
 }

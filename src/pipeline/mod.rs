@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod backfill;
+pub mod clickhouse;
 pub mod compiled;
 pub mod config_file;
 pub mod decode_args;

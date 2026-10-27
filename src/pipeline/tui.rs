@@ -1,4 +1,4 @@
-use std::io::{Stdout, stdout};
+use std::io::stdout;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -121,11 +121,12 @@ fn format_event(event: &IndexEvent) -> String {
 }
 
 fn short(s: &str) -> String {
-    if s.len() <= 8 {
-        s.to_string()
-    } else {
-        format!("{}..{}", &s[..4], &s[s.len() - 4..])
+    if s.len() > 8
+        && let (Some(head), Some(tail)) = (s.get(..4), s.get(s.len() - 4..))
+    {
+        return format!("{head}..{tail}");
     }
+    s.to_string()
 }
 
 fn draw(f: &mut Frame, stats: &LiveStats, lines: &[String]) {
@@ -156,6 +157,14 @@ fn draw(f: &mut Frame, stats: &LiveStats, lines: &[String]) {
     f.render_widget(list, chunks[1]);
 }
 
-// CrosstermBackend needs Stdout; keep type in scope for rustc.
-#[allow(dead_code)]
-type _Alias = CrosstermBackend<Stdout>;
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_does_not_cut_inside_a_char() {
+        assert_eq!(short("abcdefghij"), "abcd..ghij");
+        // Byte 4 is inside the second char.
+        assert_eq!(short("aéééé"), "aéééé");
+    }
+}
