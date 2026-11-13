@@ -103,6 +103,9 @@ fn format_event(event: &IndexEvent) -> String {
             short(source),
             short(destination)
         ),
+        IndexEvent::TokenIx {
+            slot, instruction, ..
+        } => format!("{slot} token::{instruction}"),
         IndexEvent::ProgramIx {
             slot,
             program_name,
@@ -136,11 +139,12 @@ fn draw(f: &mut Frame, stats: &LiveStats, lines: &[String]) {
         .split(f.size());
 
     let header = Paragraph::new(format!(
-        "slot {}   finalized {}   events {}   token {}   program {}   gaps {}   q to quit",
+        "slot {}   finalized {}   events {}   transfers {}   token ix {}   program {}   gaps {}   q to quit",
         stats.slot,
         stats.finalized_slot,
         stats.events_total,
         stats.token_transfers,
+        stats.token_ix,
         stats.program_ix,
         stats.open_gaps
     ))

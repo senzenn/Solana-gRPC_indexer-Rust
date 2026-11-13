@@ -17,7 +17,7 @@ Reorg-safe correctness first (P0), then decode breadth (P1), then sinks (P2).
 | P0 | Finalized cursor + orphan rollback | Done: dual cursor, parent walk, orphan delete | `block-coordinator` |
 | P1 | `ProgramEvent` + `emit!` / log decode | Open. `IndexEvent` has no `ProgramEvent`, and logs are dropped | `crates/core/src/log_messages.rs`, `tests/proc-macro-events` |
 | P1 | Log range per instruction | Open. `ix_path` holds the CPI path; the parent is its prefix | `InstructionUpdate.log_range` |
-| P1 | Full Token + Token-2022 decode | Open. `track_tokens` decodes only tags `3` (transfer) and `12` (transfer-checked) | `spl-token-parser`, `spl-token-extensions-parser` |
+| P1 | Full Token + Token-2022 decode | Done: `token_ix` from the RPC `jsonParsed` decoder. Open: p-token tags `45` and `255` (batch) are stored as `unknown` | `spl-token-parser` (handles 45 and 255) |
 | P1 | Account-state decode | Open. `decode_update` handles only `Slot` and `Transaction` | `AccountParser` in each parser crate |
 | P2 | Kafka sink + public `EventSink` | Open. `build_sinks` accepts only `stdout` and `webhook` | `crates/kafka-sink`, `Handler<T, R>` |
 | P2 | System / BPF loader / Metaplex decode | Open. Wire as built-in routers next to `IdlRouter` | `bpf-loader-parser`, `include_shipstern_parser!` |

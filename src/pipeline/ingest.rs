@@ -16,7 +16,8 @@ use yellowstone_grpc_proto::prelude::{
 use super::config_file::{CompressionKind, ReplayMode};
 use super::event::RawInstruction;
 use super::event::{
-    TOKEN_2022_PROGRAM, TOKEN_PROGRAM, failed_tx_policy, resolve_accounts, signature_from_bytes,
+    TOKEN_2022_PROGRAM, TOKEN_PROGRAM, failed_tx_policy, is_token_program, resolve_accounts,
+    signature_from_bytes,
 };
 use super::geyser;
 use super::idl::IdlRouter;
@@ -413,20 +414,22 @@ fn compiled_to_raw(
     })
 }
 
+/// `token_filter` is `None` when token decode is off. Otherwise it lists the token
+/// instruction names to keep; an empty list keeps all.
 pub fn decode_instructions(
     router: &IdlRouter,
     ixs: &[RawInstruction],
-    track_tokens: bool,
+    token_filter: Option<&[String]>,
 ) -> Vec<super::event::IndexEvent> {
     let mut events = Vec::new();
     for ix in ixs {
-        if track_tokens && let Some(event) = super::token::parse_token_ix(ix) {
-            events.push(event);
+        if let Some(only) = token_filter
+            && is_token_program(&ix.program_id)
+        {
+            events.extend(super::token::parse_token_ix(ix, only));
             continue;
         }
-        if let Some(event) = router.parse(ix) {
-            events.push(event);
-        }
+        events.extend(router.parse(ix));
     }
     events
 }
@@ -491,7 +494,7 @@ mod tests {
     fn decode_instructions_skips_token_ix_when_disabled() {
         let router = IdlRouter::default();
         let ixs = vec![spl_transfer_ix(42)];
-        let events = decode_instructions(&router, &ixs, false);
+        let events = decode_instructions(&router, &ixs, None);
         assert!(events.is_empty());
     }
 
@@ -499,7 +502,7 @@ mod tests {
     fn decode_instructions_parses_token_ix_when_enabled() {
         let router = IdlRouter::default();
         let ixs = vec![spl_transfer_ix(42)];
-        let events = decode_instructions(&router, &ixs, true);
+        let events = decode_instructions(&router, &ixs, Some(&[]));
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], IndexEvent::TokenTransfer { .. }));
         assert_eq!(events[0].ix_path(), Some("0"));
@@ -755,7 +758,7 @@ mod tests {
                     ..
                 } => confirmed.push(slot),
                 IngestMsg::Instructions(ixs) => {
-                    events += decode_instructions(&router, &ixs, true).len();
+                    events += decode_instructions(&router, &ixs, Some(&[])).len();
                 }
                 IngestMsg::GeyserError => panic!("geyser error"),
                 _ => {}

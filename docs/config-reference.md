@@ -14,8 +14,9 @@ Yellowstone geyser connection and subscription filters.
 |-------|------|---------|-------------|
 | `endpoint` | string | `""` | Geyser gRPC URL. Required unless set via `YELLOWSTONE_ENDPOINT`. A `host:port` with no scheme means `https://`, unless the host is loopback (`localhost`, `127.0.0.1`, `[::1]`), which means `http://`. A remote plaintext endpoint needs an explicit `http://`. |
 | `auth_token` | string | `""` | Provider `x-token`. Override with `YELLOWSTONE_AUTH_TOKEN`. |
-| `track_failed` | bool | `false` | When `true`, include failed transactions in the geyser subscription and in RPC backfill. Their `program_ix` events carry `"failed": true`; their token-program instructions never become `token_transfer` events. Default excludes failed txs. |
-| `track_tokens` | bool | `false` | When `true`, subscribe to SPL Token and Token-2022 program traffic. **High volume**. Enable it only when you need token transfer events. |
+| `track_failed` | bool | `false` | When `true`, include failed transactions in the geyser subscription and in RPC backfill. Their `program_ix` events carry `"failed": true`; their token-program instructions never become token events. Default excludes failed txs. |
+| `track_tokens` | bool | `false` | When `true`, subscribe to SPL Token and Token-2022 traffic and decode every token instruction. **High volume**: about 600 instructions per mainnet slot. Transfer and transfer-checked become `token_transfer`. All other instructions become `token_ix`, see [Token events](#token-events). |
+| `token_instructions` | string[] | `[]` | Snake_case token instruction names to keep, for example `[transfer, transfer_checked, mint_to]`. Empty keeps all. Needs `track_tokens: true`. A name that is not snake_case is an error. `transfer` and `transfer_checked` are separate names, and most mainnet transfers are `transfer_checked`. A misspelled name is not detected: it only matches nothing. |
 | `accounts_include` | string[] | `[]` | Additional account pubkeys passed to the geyser `account_include` filter. Program IDs from loaded IDLs are always included. |
 | `replay` | `auto` / `on` / `off` | `auto` | Whether to send `from_slot` on start and on reconnect. `auto` calls `SubscribeReplayInfo` and sends `from_slot` only when the server reports a replay buffer. Check an endpoint with `index probe`. Some servers still reject `from_slot`: see the [runbook](./operations-runbook.md#cursor-semantics). |
 | `ping_secs` | u64 | `10` | Bidirectional subscribe ping so load balancers do not drop idle streams. `0` disables client pings. |
@@ -90,9 +91,9 @@ Each sink entry:
 |-------|------|----------|-------------|
 | `kind` | string | yes | `stdout` or `webhook` |
 | `url` | string | webhook only | HTTP POST target for webhook sinks |
-| `types` | string[] | no | Filter by event kind: `program_ix` or `token_transfer`. Sinks get only these two kinds, never `slot`, `gap` or `idl_drift` events |
+| `types` | string[] | no | Filter by event kind: `program_ix`, `token_transfer` or `token_ix`. Sinks get only these kinds, never `slot`, `gap` or `idl_drift` events |
 | `programs` | string[] | no | Filter by program name: an exact match on the IDL program name (for example `pumpFun`) or the token program id |
-| `instructions` | string[] | no | Filter `program_ix` events by instruction name (e.g. `buy`, `swap`) |
+| `instructions` | string[] | no | Filter `program_ix` and `token_ix` events by instruction name (e.g. `buy`, `mint_to`) |
 
 ### Examples
 
@@ -115,6 +116,23 @@ entry, for example `sinks[1]: unknown sink kind: kafka`.
 
 Webhooks use a 2s connect timeout and a 5s request timeout, try each event up
 to 3 times, and do not follow redirects. Under `--tui`, `stdout` sinks are off.
+
+## Token events
+
+With `track_tokens: true`, each SPL Token or Token-2022 instruction gives one event:
+
+- Transfer (tag 3) and transfer-checked (tag 12) give `token_transfer`, with
+  `source`, `destination`, `authority`, `mint`, `amount` and `decimals`.
+- Every other instruction gives `token_ix`, with `instruction` (for example
+  `mint_to`, `close_account`, `transfer_checked_with_fee`) and `info`. `info`
+  holds the RPC `jsonParsed` fields with snake_case keys, for example
+  `token_amount.ui_amount_string`. Values keep their RPC form: amounts are
+  strings, and enum values such as `"freezeAccount"` do not change.
+- Data the decoder cannot read gives `instruction: "unknown"` with
+  `info = {tag, data (base58), accounts}`. On mainnet this is about 0.07% of
+  `token_ix` events: p-token tags `45` (unwrap lamports) and `255` (batch).
+
+Token instructions of failed transactions never become events.
 
 ## `auth`
 
@@ -196,7 +214,7 @@ Env vars load from `.env` and override YAML when non-empty.
 | `CLICKHOUSE_PASSWORD` | none (env only) | Sent as `X-ClickHouse-Key` |
 | `INDEX_API_KEYS` | `auth.api_keys` | Comma-separated; replaces entire auth block. Empty counts as unset; a value with no key in it (for example `,`) is an error |
 
-No env overrides exist for `track_failed`, `track_tokens`, `accounts_include`, `sinks`, `grpc`, or `programs`. Set those in YAML.
+No env overrides exist for `track_failed`, `track_tokens`, `token_instructions`, `accounts_include`, `sinks`, `grpc`, or `programs`. Set those in YAML.
 
 ## CLI overrides (`index run`)
 

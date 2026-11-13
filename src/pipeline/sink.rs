@@ -44,7 +44,9 @@ pub fn matches_filter(event: &IndexEvent, filter: &SinkFilter) -> bool {
         && !instructions.is_empty()
     {
         let ix_name = match event {
-            IndexEvent::ProgramIx { instruction, .. } => Some(instruction.as_str()),
+            IndexEvent::ProgramIx { instruction, .. } | IndexEvent::TokenIx { instruction, .. } => {
+                Some(instruction.as_str())
+            }
             _ => None,
         };
         match ix_name {
@@ -236,7 +238,7 @@ fn build_sink(cfg: &SinkConfig, client: &Client) -> Result<Box<dyn EventSink + S
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pipeline::event::IndexEvent;
+    use crate::pipeline::event::{IndexEvent, TOKEN_PROGRAM};
     use crate::pipeline::testutil::transfer;
 
     fn program_ix_event() -> IndexEvent {
@@ -311,6 +313,25 @@ mod tests {
         };
         assert!(matches_filter(&program_ix_event(), &filter));
         assert!(!matches_filter(&transfer(1, "sig"), &filter));
+    }
+
+    #[test]
+    fn instruction_filter_matches_token_ix() {
+        let filter = SinkFilter {
+            kinds: None,
+            programs: None,
+            instructions: Some(vec!["mint_to".into()]),
+        };
+        let mint_to = IndexEvent::TokenIx {
+            slot: 1,
+            signature: "sig".into(),
+            ix_index: 0,
+            ix_path: "0".into(),
+            program: TOKEN_PROGRAM.into(),
+            instruction: "mint_to".into(),
+            info: serde_json::json!({}),
+        };
+        assert!(matches_filter(&mint_to, &filter));
     }
 
     #[test]

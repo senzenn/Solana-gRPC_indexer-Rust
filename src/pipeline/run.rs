@@ -47,6 +47,8 @@ pub struct RunArgs {
     pub grpc_bind: Option<SocketAddr>,
     pub track_failed: bool,
     pub track_tokens: bool,
+    /// Token instruction names to keep when `track_tokens` is on; empty keeps all.
+    pub token_instructions: Vec<String>,
     pub accounts_include: Vec<String>,
     pub replay: super::config_file::ReplayMode,
     pub ping_secs: u64,
@@ -106,6 +108,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
 
     let last_slot_atomic = Arc::new(AtomicU64::new(cursor.as_ref().map(|c| c.slot).unwrap_or(0)));
     let track_tokens = args.track_tokens;
+    let token_filter = track_tokens.then_some(args.token_instructions);
     let ingest_cfg = IngestConfig {
         endpoint: args.endpoint,
         auth_token: args.auth_token,
@@ -134,7 +137,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
             rpc_url,
             store.clone(),
             router.clone(),
-            track_tokens,
+            token_filter.clone(),
         )
         .with_track_failed(args.track_failed)
         .with_publish(bus.clone(), sink_tx.clone());
@@ -186,7 +189,7 @@ pub async fn run(args: RunArgs) -> Result<()> {
     let mut pipeline = Pipeline {
         store,
         router,
-        track_tokens,
+        token_filter,
         bus,
         stats,
         gap_tx,
@@ -226,7 +229,8 @@ pub async fn run(args: RunArgs) -> Result<()> {
 struct Pipeline {
     store: Arc<EventStore>,
     router: IdlRouter,
-    track_tokens: bool,
+    /// Token instruction names to keep; `None` turns token decode off.
+    token_filter: Option<Vec<String>>,
     bus: broadcast::Sender<IndexEvent>,
     stats: Arc<RwLock<LiveStats>>,
     gap_tx: Option<mpsc::Sender<(u64, u64)>>,
@@ -334,7 +338,7 @@ impl Pipeline {
             IngestMsg::Instructions(ixs) => {
                 // Event slots do not move the gap baseline or the resume slot: a slot is
                 // complete only at its confirmed status.
-                let events = decode_instructions(&self.router, &ixs, self.track_tokens);
+                let events = decode_instructions(&self.router, &ixs, self.token_filter.as_deref());
                 for event in events {
                     let inserted = self.store.write_event(&event).await?;
                     if !inserted {
@@ -346,6 +350,7 @@ impl Pipeline {
                         s.slot = self.last_slot.unwrap_or(s.slot);
                         match &event {
                             IndexEvent::TokenTransfer { .. } => s.token_transfers += 1,
+                            IndexEvent::TokenIx { .. } => s.token_ix += 1,
                             IndexEvent::ProgramIx { .. } => s.program_ix += 1,
                             _ => {}
                         }
@@ -621,7 +626,7 @@ mod tests {
         Pipeline {
             store,
             router: IdlRouter::default(),
-            track_tokens: true,
+            token_filter: Some(Vec::new()),
             bus: broadcast::channel(16).0,
             stats: Arc::new(RwLock::new(LiveStats::default())),
             gap_tx: None,

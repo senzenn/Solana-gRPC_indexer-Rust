@@ -8,6 +8,10 @@ use super::ix_path::IxPath;
 pub const TOKEN_PROGRAM: &str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 pub const TOKEN_2022_PROGRAM: &str = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 
+pub fn is_token_program(program_id: &str) -> bool {
+    program_id == TOKEN_PROGRAM || program_id == TOKEN_2022_PROGRAM
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IndexEvent {
@@ -28,6 +32,18 @@ pub enum IndexEvent {
         mint: Option<String>,
         amount: u64,
         decimals: Option<u8>,
+    },
+    /// Any SPL Token / Token-2022 instruction except Transfer (3) and TransferChecked (12).
+    /// `instruction` and the keys of `info` are snake_case; `unknown` holds unreadable data.
+    TokenIx {
+        slot: u64,
+        signature: String,
+        ix_index: u32,
+        #[serde(default)]
+        ix_path: String,
+        program: String,
+        instruction: String,
+        info: serde_json::Value,
     },
     ProgramIx {
         slot: u64,
@@ -65,6 +81,7 @@ impl IndexEvent {
         match self {
             Self::Slot { slot, .. }
             | Self::TokenTransfer { slot, .. }
+            | Self::TokenIx { slot, .. }
             | Self::ProgramIx { slot, .. } => Some(*slot),
             Self::Gap { to_slot, .. } => Some(*to_slot),
             Self::IdlDrift { .. } => None,
@@ -75,6 +92,7 @@ impl IndexEvent {
         match self {
             Self::Slot { .. } => "slot",
             Self::TokenTransfer { .. } => "token_transfer",
+            Self::TokenIx { .. } => "token_ix",
             Self::ProgramIx { .. } => "program_ix",
             Self::IdlDrift { .. } => "idl_drift",
             Self::Gap { .. } => "gap",
@@ -83,7 +101,7 @@ impl IndexEvent {
 
     pub fn program(&self) -> &str {
         match self {
-            Self::TokenTransfer { program, .. } => program,
+            Self::TokenTransfer { program, .. } | Self::TokenIx { program, .. } => program,
             Self::ProgramIx { program_name, .. } => program_name,
             Self::IdlDrift { program_name, .. } => program_name,
             Self::Slot { .. } => "slot",
@@ -94,18 +112,18 @@ impl IndexEvent {
     #[cfg(test)]
     pub fn signature(&self) -> Option<&str> {
         match self {
-            Self::TokenTransfer { signature, .. } | Self::ProgramIx { signature, .. } => {
-                Some(signature)
-            }
+            Self::TokenTransfer { signature, .. }
+            | Self::TokenIx { signature, .. }
+            | Self::ProgramIx { signature, .. } => Some(signature),
             _ => None,
         }
     }
 
     pub fn ix_index(&self) -> Option<u32> {
         match self {
-            Self::TokenTransfer { ix_index, .. } | Self::ProgramIx { ix_index, .. } => {
-                Some(*ix_index)
-            }
+            Self::TokenTransfer { ix_index, .. }
+            | Self::TokenIx { ix_index, .. }
+            | Self::ProgramIx { ix_index, .. } => Some(*ix_index),
             _ => None,
         }
     }
@@ -113,9 +131,9 @@ impl IndexEvent {
     #[cfg(test)]
     pub fn ix_path(&self) -> Option<&str> {
         match self {
-            Self::TokenTransfer { ix_path, .. } | Self::ProgramIx { ix_path, .. } => {
-                Some(ix_path.as_str())
-            }
+            Self::TokenTransfer { ix_path, .. }
+            | Self::TokenIx { ix_path, .. }
+            | Self::ProgramIx { ix_path, .. } => Some(ix_path.as_str()),
             _ => None,
         }
     }
@@ -124,6 +142,9 @@ impl IndexEvent {
     pub fn store_identity(&self) -> (String, String) {
         match self {
             Self::TokenTransfer {
+                signature, ix_path, ..
+            }
+            | Self::TokenIx {
                 signature, ix_path, ..
             }
             | Self::ProgramIx {
@@ -140,6 +161,9 @@ impl IndexEvent {
     pub fn fill_ix_path(&mut self) {
         match self {
             Self::TokenTransfer {
+                ix_index, ix_path, ..
+            }
+            | Self::TokenIx {
                 ix_index, ix_path, ..
             }
             | Self::ProgramIx {
@@ -250,7 +274,7 @@ pub fn failed_tx_policy(
         return Vec::new();
     }
     ixs.into_iter()
-        .filter(|ix| ix.program_id != TOKEN_PROGRAM && ix.program_id != TOKEN_2022_PROGRAM)
+        .filter(|ix| !is_token_program(&ix.program_id))
         .map(|ix| RawInstruction { failed: true, ..ix })
         .collect()
 }

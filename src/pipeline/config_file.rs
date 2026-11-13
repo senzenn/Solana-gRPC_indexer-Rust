@@ -110,6 +110,9 @@ pub struct GeyserConfig {
     pub track_failed: bool,
     #[serde(default)]
     pub track_tokens: bool,
+    /// Snake_case token instruction names to keep (`transfer`, `mint_to`, ...). Empty keeps all.
+    #[serde(default)]
+    pub token_instructions: Vec<String>,
     #[serde(default)]
     pub accounts_include: Vec<String>,
     /// `auto` (default) probes replay; `off` never sends `from_slot`; `on` always tries.
@@ -121,6 +124,26 @@ pub struct GeyserConfig {
     /// Payload compression to accept from the server.
     #[serde(default)]
     pub compression: CompressionKind,
+}
+
+impl GeyserConfig {
+    /// A list that cannot match (`mintTo`, or token decode off) would drop data with no error.
+    pub fn validate_token_instructions(&self) -> Result<()> {
+        if !self.token_instructions.is_empty() && !self.track_tokens {
+            bail!("geyser.token_instructions needs geyser.track_tokens: true");
+        }
+        for name in &self.token_instructions {
+            let snake = name
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+            if name.is_empty() || !snake {
+                bail!(
+                    "geyser.token_instructions: {name:?} is not a snake_case name (for example mint_to)"
+                );
+            }
+        }
+        Ok(())
+    }
 }
 
 pub const DEFAULT_PING_SECS: u64 = 10;
@@ -288,6 +311,7 @@ impl IndexConfig {
         if let Some(auth) = &self.auth {
             auth.keys()?;
         }
+        self.geyser.validate_token_instructions()?;
         super::sink::validate_sinks(&self.sinks).context("invalid sinks config")?;
         if let Some(clickhouse) = &self.clickhouse {
             clickhouse.validate()?;
@@ -307,6 +331,7 @@ mod tests {
                 auth_token: String::new(),
                 track_failed: false,
                 track_tokens: false,
+                token_instructions: Vec::new(),
                 accounts_include: Vec::new(),
                 replay: ReplayMode::Auto,
                 ping_secs: default_ping_secs(),
@@ -445,6 +470,17 @@ mod tests {
         let sink_typo = raw.replace("  - kind: stdout", "  - kind: stdout\n    type: [\"gap\"]");
         assert_ne!(sink_typo, raw);
         assert!(serde_yaml::from_str::<IndexConfig>(&sink_typo).is_err());
+    }
+
+    #[test]
+    fn token_instructions_need_track_tokens_and_snake_case() {
+        let mut cfg = yaml_config();
+        cfg.geyser.token_instructions = vec!["mint_to".into()];
+        assert!(cfg.validate().is_err());
+        cfg.geyser.track_tokens = true;
+        cfg.validate().expect("snake_case names with track_tokens");
+        cfg.geyser.token_instructions = vec!["mintTo".into()];
+        assert!(cfg.validate().is_err());
     }
 
     #[test]

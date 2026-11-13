@@ -30,6 +30,7 @@ pub async fn run_demo(db: String, bind: SocketAddr, api_keys: Vec<String>) -> Re
         for e in &recent {
             match e {
                 super::event::IndexEvent::TokenTransfer { .. } => st.token_transfers += 1,
+                super::event::IndexEvent::TokenIx { .. } => st.token_ix += 1,
                 super::event::IndexEvent::ProgramIx { .. } => st.program_ix += 1,
                 _ => {}
             }

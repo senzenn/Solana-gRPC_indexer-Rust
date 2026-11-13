@@ -11,8 +11,12 @@ geyser:
   # Include failed transactions in the geyser subscription (default: false).
   # Their program_ix events carry "failed": true.
   track_failed: false
-  # Subscribe to SPL Token / Token-2022 programs and parse transfers (default: false)
+  # Subscribe to SPL Token / Token-2022 and decode every token instruction (default: false).
+  # High volume. Transfers become token_transfer events; all others become token_ix.
   track_tokens: false
+  # Optional snake_case allowlist when track_tokens is on, e.g. [transfer, transfer_checked, mint_to].
+  # transfer and transfer_checked are separate names; most mainnet transfers are transfer_checked.
+  token_instructions: []
   # Extra account pubkeys to include in the geyser transaction filter
   accounts_include: []
   # from_slot at start and on reconnect: auto (probe SubscribeReplayInfo) | on | off
@@ -41,7 +45,7 @@ rpc_url: "https://api.mainnet-beta.solana.com"
 sinks:
   - kind: stdout
     # Optional filters (all must match when set):
-    # types: ["program_ix", "token_transfer"]
+    # types: ["program_ix", "token_transfer", "token_ix"]
     # programs: ["pumpFun"]   # exact IDL program name
     # instructions: ["buy", "sell"]
 

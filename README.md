@@ -118,6 +118,7 @@ clippy, validates `index.example.yaml`, then starts demo and curls `/health` and
 
 - Anchor and Codama IDL decode: instruction name, args, named accounts
 - Compiled shipstern parsers from `parsers/`
+- SPL Token and Token-2022 decode: every instruction, including extensions (`track_tokens`)
 - Geyser filters: `track_tokens`, `track_failed`, `accounts_include`, `wallets`
 - CPI-stable `ix_path` identity, the same for geyser and RPC backfill
 - Confirmed + finalized cursors with orphan-slot rollback

@@ -23,7 +23,8 @@ clap = { version = "4.5.46", features = ["derive", "color", "env", "unicode", "w
 clap_complete = "4.5.46"
 solana-sdk = "3.0.0"
 solana-client = "3.0.0"
-solana-transaction-status = "3.0.0"
+# token.rs uses parse_token, an Agave unstable API; the feature acknowledges that it can break.
+solana-transaction-status = { version = "3.0.0", features = ["agave-unstable-api"] }
 solana-commitment-config = "3.1.1"
 
 # gRPC and serialization

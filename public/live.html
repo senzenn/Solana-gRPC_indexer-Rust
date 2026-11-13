@@ -43,7 +43,7 @@
     let retryMs = 1000;
     function detail(e) {
       if (e.type === "token_transfer") return e.amount + "  " + (e.source || "").slice(0, 8) + " -> " + (e.destination || "").slice(0, 8);
-      if (e.type === "program_ix") return e.instruction + "  " + (e.signature || "").slice(0, 12);
+      if (e.type === "program_ix" || e.type === "token_ix") return e.instruction + "  " + (e.signature || "").slice(0, 12);
       if (e.type === "gap") return e.from_slot + ".." + e.to_slot;
       if (e.type === "idl_drift") return e.severity + "  " + e.summary;
       if (e.type === "lagged") return e.skipped + " events skipped (client too slow); use /events to resync";

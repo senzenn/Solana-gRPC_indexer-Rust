@@ -298,6 +298,13 @@ fn resolve_run_args(
 
     let track_failed = cfg.as_ref().map(|c| c.geyser.track_failed).unwrap_or(false);
     let track_tokens = cfg.as_ref().map(|c| c.geyser.track_tokens).unwrap_or(false);
+    let token_instructions = match &cfg {
+        Some(c) => {
+            c.geyser.validate_token_instructions()?;
+            c.geyser.token_instructions.clone()
+        }
+        None => Vec::new(),
+    };
     let accounts_include = cfg
         .as_ref()
         .map(|c| c.geyser.accounts_include.clone())
@@ -327,6 +334,7 @@ fn resolve_run_args(
         grpc_bind,
         track_failed,
         track_tokens,
+        token_instructions,
         accounts_include,
         replay,
         ping_secs,
