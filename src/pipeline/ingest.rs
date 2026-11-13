@@ -83,7 +83,8 @@ pub async fn run_ingest(
                 let _ = tx.send(IngestMsg::Reconnect).await;
             }
             Err(err) => {
-                warn!(error = %err, "geyser stream error; reconnecting");
+                // `{:#}` keeps the cause chain; the top context alone hides an HTTP 403.
+                warn!(error = %format_args!("{err:#}"), "geyser stream error; reconnecting");
                 let _ = tx.send(IngestMsg::GeyserError).await;
                 let _ = tx.send(IngestMsg::Reconnect).await;
             }
