@@ -20,11 +20,18 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
+      # build.rs compiles src/proto, which needs protoc.
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
       - name: cargo build
         run: cargo build --bin index
 
       - name: cargo test
         run: cargo test
+
+      - name: cargo test (vendor/idl-drift)
+        run: cargo test --manifest-path vendor/idl-drift/Cargo.toml
 
       - name: cargo clippy
         run: cargo clippy --bin index -- -D warnings

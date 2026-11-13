@@ -1,3 +1,0 @@
-IX|x|disc=1
-TYPE|Dead|kind=type;serialization=borsh
-ALIAS|Dead|target=u64

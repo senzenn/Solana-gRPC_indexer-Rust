@@ -1,5 +1,5 @@
 services:
-  # Read-only HTTP/WS over SQLite; no geyser credentials required.
+  # Serves stored events with no geyser credentials. Not read-only: it runs migrations.
   # Start with: docker compose --profile demo up --build demo
   demo:
     profiles: ["demo"]

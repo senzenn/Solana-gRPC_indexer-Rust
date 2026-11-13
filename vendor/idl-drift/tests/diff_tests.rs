@@ -1,7 +1,4 @@
-//! Integration tests — assert the Rust engine's verdict matches the awk oracle
-//! (proto/*.facts, 13/13 green) on equivalent JSON fixtures.
-//!
-//! Run: `cargo test`
+//! Integration tests for the diff engine.
 //!
 //! Each test builds two IDLs inline and checks (a) whether a breaking change is
 //! present (the CI contract) and (b) the highest severity reported.
@@ -47,7 +44,7 @@ const AMM_NEW: &str = r#"{
 
 #[test]
 fn amm_pool_field_width_is_breaking() {
-    // Pool.feeBps u16->u32 on a reachable account type => breaking (oracle: amm exit=1)
+    // Pool.feeBps u16->u32 on a reachable account type => breaking
     let r = diff(&parse(AMM_OLD), &parse(AMM_NEW));
     assert!(r.has_breaking(), "expected breaking; got {:?}", r.changes);
     assert_eq!(r.exit_code(), 1);
@@ -66,7 +63,6 @@ const DEAD_NEW: &str = r#"{
 
 #[test]
 fn unreachable_type_change_is_not_breaking() {
-    // oracle: dead exit=0
     let r = diff(&parse(DEAD_OLD), &parse(DEAD_NEW));
     assert!(
         !r.has_breaking(),
@@ -94,7 +90,6 @@ const ENUM_INSERT: &str = r#"{
 
 #[test]
 fn enum_append_is_dangerous_not_breaking() {
-    // oracle: enumappend exit=0
     let r = diff(&parse(ENUM_OLD), &parse(ENUM_APPEND));
     assert!(
         !r.has_breaking(),
@@ -106,7 +101,6 @@ fn enum_append_is_dangerous_not_breaking() {
 
 #[test]
 fn enum_middle_insert_is_breaking() {
-    // oracle: enum exit=1 (Slow shifts tag 1->2)
     let r = diff(&parse(ENUM_OLD), &parse(ENUM_INSERT));
     assert!(
         r.has_breaking(),
@@ -130,7 +124,6 @@ const SER_NEW: &str = r#"{
 
 #[test]
 fn serialization_mode_change_is_breaking() {
-    // oracle: serial exit=1
     let r = diff(&parse(SER_OLD), &parse(SER_NEW));
     assert!(
         r.has_breaking(),

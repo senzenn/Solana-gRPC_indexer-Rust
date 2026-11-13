@@ -48,7 +48,8 @@ pub struct BackfillWorker {
     rpc_url: String,
     store: Arc<EventStore>,
     router: IdlRouter,
-    track_tokens: bool,
+    /// Token instruction names to keep; `None` turns token decode off.
+    token_filter: Option<Vec<String>>,
     track_failed: bool,
     bus: Option<broadcast::Sender<IndexEvent>>,
     sinks: Option<mpsc::Sender<IndexEvent>>,
@@ -71,13 +72,13 @@ impl BackfillWorker {
         rpc_url: String,
         store: Arc<EventStore>,
         router: IdlRouter,
-        track_tokens: bool,
+        token_filter: Option<Vec<String>>,
     ) -> Self {
         Self {
             rpc_url,
             store,
             router,
-            track_tokens,
+            token_filter,
             track_failed: false,
             bus: None,
             sinks: None,
@@ -271,7 +272,7 @@ impl BackfillWorker {
                 self.track_failed,
             ));
         }
-        let events = decode_instructions(&self.router, &ixs, self.track_tokens);
+        let events = decode_instructions(&self.router, &ixs, self.token_filter.as_deref());
         let event_count = events.len();
         let mut stored = true;
         for event in events {
@@ -566,7 +567,7 @@ mod tests {
 
         let (store, _db) = temp_store().await;
         let mut worker =
-            BackfillWorker::new(String::new(), store.clone(), IdlRouter::default(), false);
+            BackfillWorker::new(String::new(), store.clone(), IdlRouter::default(), None);
         worker.max_attempts = 1;
         worker.chunk_slots = 4;
         let fetch = |slot: u64| async move {
@@ -597,7 +598,7 @@ mod tests {
         use std::sync::atomic::{AtomicU32, Ordering};
 
         let (store, _db) = temp_store().await;
-        let worker = BackfillWorker::new(String::new(), store.clone(), IdlRouter::default(), false);
+        let worker = BackfillWorker::new(String::new(), store.clone(), IdlRouter::default(), None);
         let calls = AtomicU32::new(0);
         let fetch = |_slot: u64| {
             calls.fetch_add(1, Ordering::SeqCst);
@@ -635,7 +636,7 @@ mod tests {
 
         let (store, _db) = temp_store().await;
         let mut worker =
-            BackfillWorker::new(String::new(), store.clone(), IdlRouter::default(), false);
+            BackfillWorker::new(String::new(), store.clone(), IdlRouter::default(), None);
         worker.max_attempts = 1;
         let slot3_calls = AtomicU32::new(0);
         // The first fetch of slot 3 fails, so its gap stays open after the first pass.

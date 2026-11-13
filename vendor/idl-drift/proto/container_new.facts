@@ -1,3 +1,0 @@
-IX|swap|disc=7,7,7,7,7,7,7,7
-IXARG|swap#0|name=amounts;type=Vec:u32
-IXARG|swap#1|name=memo;type=string

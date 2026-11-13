@@ -54,6 +54,7 @@ pub struct LiveStats {
     pub finalized_slot: u64,
     pub events_total: u64,
     pub token_transfers: u64,
+    pub token_ix: u64,
     pub program_ix: u64,
     pub open_gaps: i64,
     pub lag_slots: u64,

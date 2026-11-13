@@ -1,78 +1,25 @@
-# Rust
 /target/
 vendor/idl-drift/target/
-**/*.rs.bk
-# lockfile is kept for the binary
-# Cargo.lock
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Environment and secrets
+# Secrets and local config
 .env
-.env.local
-.env.production
-.env.staging
+.env.*
+!.env.example
+index.yaml
 *.pem
 *.key
 *.crt
 
-# Database
+# Local data
 *.db
+*.db-*
 *.sqlite
 *.sqlite3
 /data/
-
-# Logs
 *.log
-logs/
 
-# IPFS
-.ipfs/
-
-# Cache
-cache/
-.cache/
-
-# Temporary files
-tmp/
-temp/
-*.tmp
-
-# Build artifacts
-dist/
-build/
-
-# Backup files
-*.bak
-*.backup
-
-# Coverage reports
-coverage/
-*.profraw
-
-# Node modules (if any JS tools)
-node_modules/
-
-# Python (if any Python tools)
-__pycache__/
-*.py[cod]
-*$py.class
-
-# Local configuration
-config.local.*
-
-# Documentation build
-/docs/_build/
-
-# Keep example files
-!.env.example
-!config.example.*
+# Editor and OS
+.vscode/
+.idea/
+*.swp
+.DS_Store

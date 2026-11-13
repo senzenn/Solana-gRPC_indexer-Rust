@@ -5,10 +5,12 @@
 
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use tonic::codec::CompressionEncoding;
 use tracing::{info, warn};
-use yellowstone_grpc_client::{ClientTlsConfig, GeyserGrpcClient, Interceptor};
+use yellowstone_grpc_client::{
+    ClientTlsConfig, GeyserGrpcClient, GeyserGrpcClientError, Interceptor,
+};
 
 use super::config_file::{CompressionKind, ReplayMode};
 
@@ -157,17 +159,12 @@ pub async fn connect(
 /// replay slot. Safe on Triton and Richat: missing replay RPCs mean no replay.
 pub async fn server_info<F: Interceptor>(
     client: &mut GeyserGrpcClient<F>,
-) -> (Option<String>, Option<u64>) {
-    let version = match client.get_version().await {
-        Ok(resp) => {
-            info!(version = %resp.version, "geyser GetVersion");
-            Some(resp.version)
-        }
-        Err(err) => {
-            warn!(error = %err, "GetVersion not available");
-            None
-        }
-    };
+) -> (Result<String, GeyserGrpcClientError>, Option<u64>) {
+    let version = client.get_version().await.map(|resp| resp.version);
+    match &version {
+        Ok(version) => info!(%version, "geyser GetVersion"),
+        Err(err) => warn!(error = %err, "GetVersion not available"),
+    }
     let first_available = match client.subscribe_replay_info().await {
         // Yellowstone answers Ok with no slot when its replay buffer is off.
         Ok(info) => {
@@ -192,9 +189,23 @@ pub async fn probe(
     let (version, replay_first_available) = server_info(&mut client).await;
     Ok(ProbeReport {
         endpoint: endpoint_label(&endpoint),
-        version,
+        version: probe_version(version)?,
         replay_first_available,
     })
+}
+
+/// A server without GetVersion can still stream. Any other error (a bad token,
+/// an HTTP 403 from the gateway) means the endpoint is not usable.
+fn probe_version(version: Result<String, GeyserGrpcClientError>) -> Result<Option<String>> {
+    match version {
+        Ok(version) => Ok(Some(version)),
+        Err(GeyserGrpcClientError::TonicStatus(status))
+            if status.code() == tonic::Code::Unimplemented =>
+        {
+            Ok(None)
+        }
+        Err(err) => bail!("geyser GetVersion failed: {err}"),
+    }
 }
 
 pub fn resolve_from_slot(
@@ -230,6 +241,18 @@ pub fn resolve_from_slot(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn probe_fails_unless_get_version_is_unimplemented() {
+        let status = |s| Err(GeyserGrpcClientError::TonicStatus(s));
+        assert_eq!(probe_version(Ok("1".into())).unwrap(), Some("1".into()));
+        assert_eq!(
+            probe_version(status(tonic::Status::unimplemented(""))).unwrap(),
+            None
+        );
+        assert!(probe_version(status(tonic::Status::internal("403 Forbidden"))).is_err());
+        assert!(probe_version(status(tonic::Status::unauthenticated(""))).is_err());
+    }
 
     #[test]
     fn normalize_https_triton_style() {

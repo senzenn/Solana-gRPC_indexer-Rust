@@ -23,7 +23,8 @@ clap = { version = "4.5.46", features = ["derive", "color", "env", "unicode", "w
 clap_complete = "4.5.46"
 solana-sdk = "3.0.0"
 solana-client = "3.0.0"
-solana-transaction-status = "3.0.0"
+# token.rs uses parse_token, an Agave unstable API; the feature acknowledges that it can break.
+solana-transaction-status = { version = "3.0.0", features = ["agave-unstable-api"] }
 solana-commitment-config = "3.1.1"
 
 # gRPC and serialization
@@ -55,7 +56,7 @@ reqwest = { version = "0.12.8", features = ["json", "stream"] }
 # SQLx database client
 sqlx = { version = "0.8.5", features = ["runtime-tokio-rustls", "sqlite", "postgres", "chrono", "uuid", "migrate"] }
 
-# Compression (IPFS CLI commands are simulated; no ipfs-api client)
+# zlib for on-chain Anchor IDL accounts (parser fetch)
 flate2 = "1.0"
 
 # Async trait support
