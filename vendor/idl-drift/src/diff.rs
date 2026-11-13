@@ -1,8 +1,7 @@
 //! diff.rs — semantic IDL diff + classification.
 //!
-//! Ported rule-for-rule from the awk prototype (`proto/diff.awk`), which was
-//! validated against 13 fixtures. Every rule here is grounded in how Vixen's
-//! generated parser actually reads bytes (see crates/spl-token-parser):
+//! Every rule here is grounded in how Vixen's generated parser reads bytes
+//! (see crates/spl-token-parser):
 //!   - accounts read positionally by index (`ix.accounts[0]`, `[1]`, ...)
 //!   - `check_min_accounts_req(len, N)` gates every instruction
 //!   - discriminator tag-dispatch routes instructions

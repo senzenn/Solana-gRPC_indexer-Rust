@@ -11,7 +11,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && mkdir -p /data && chown indexer:indexer /data
 COPY --from=build /app/target/release/index /usr/local/bin/index
 COPY --from=build /app/idls /app/idls
-COPY --from=build /app/public /app/public
 WORKDIR /app
 ENV DATABASE_URL=sqlite:/data/index.db
 USER indexer

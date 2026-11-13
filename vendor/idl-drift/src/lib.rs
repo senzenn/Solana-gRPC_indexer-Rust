@@ -6,8 +6,7 @@
 //!
 //! The classification rules are grounded in how Vixen's generated parsers read
 //! bytes (positional accounts, `check_min_accounts_req`, discriminator
-//! dispatch, tag-indexed `oneof` enums) and validated against an awk oracle
-//! (`proto/diff.awk`) covering 16 fixtures.
+//! dispatch, tag-indexed `oneof` enums).
 #![warn(clippy::pedantic)]
 // Match Vixen's own crate posture (see crates/parser/src/lib.rs): pedantic
 // warnings on, but docs/errors-doc/panics-doc allowances so the gate is

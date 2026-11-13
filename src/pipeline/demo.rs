@@ -10,7 +10,7 @@ use super::metrics as prom;
 use super::serve::{AppState, LiveStats, serve};
 use super::store::EventStore;
 
-/// Serve the live UI + REST/WS from an existing SQLite/Postgres DB without geyser ingest.
+/// Serve the live UI + REST/WS from a SQLite/Postgres DB without geyser ingest.
 pub async fn run_demo(db: String, bind: SocketAddr, api_keys: Vec<String>) -> Result<()> {
     let store = Arc::new(EventStore::open(&db).await?);
     let cursor = store.load_cursor().await?;

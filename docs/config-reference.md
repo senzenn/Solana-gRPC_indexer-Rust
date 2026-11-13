@@ -1,22 +1,10 @@
 # Config reference (`index.yaml`)
 
-The indexer is driven by a single YAML file. Copy `index.example.yaml` to `index.yaml` and adjust values. CLI flags passed to `index run` override config file values where both apply.
+Copy [`index.example.yaml`](../index.example.yaml) to `index.yaml`. Check it
+with `cargo run -- config validate --file index.yaml`.
 
-Unknown keys are errors in every section (top level, `geyser`, `store`,
-`serve`, `sinks`, `auth`, `grpc`, `clickhouse`). A misspelled `auth:` or
-`api_keys:` therefore stops startup and cannot turn API auth off.
-
-Validate before running:
-
-```bash
-cargo run -- config validate --file index.yaml
-```
-
-## Top-level structure
-
-For the full file with every section, see [`index.example.yaml`](../index.example.yaml).
-
----
+Unknown keys are errors in every section. A misspelled `auth:` or `api_keys:`
+stops startup and cannot turn API auth off.
 
 ## `geyser`
 
@@ -33,20 +21,9 @@ Yellowstone geyser connection and subscription filters.
 | `ping_secs` | u64 | `10` | Bidirectional subscribe ping so load balancers do not drop idle streams. `0` disables client pings. |
 | `compression` | `zstd` / `gzip` | `zstd` | Payload compression. `zstd` for Triton/Richat on `:443`. `gzip` is the original Yellowstone default. |
 
-### Subscription behavior
-
-The geyser filter is built from:
-
-1. `wallets` (if non-empty): wallet-centric filtering
-2. `geyser.accounts_include`: extra pubkeys
-3. Program IDs discovered from IDL files in `programs`, and from compiled parsers ([parsers/README.md](../parsers/README.md))
-4. Token programs: only when `track_tokens: true`
-
-The filter is the union of these lists. No list replaces another.
-
-Votes are always excluded. Failed transactions are included only when `track_failed: true`.
-
----
+The geyser `account_include` filter is the union of `wallets`,
+`accounts_include`, the program ids of loaded and compiled IDLs, and the token
+programs when `track_tokens: true`. Votes are always excluded.
 
 ## `store`
 
@@ -60,14 +37,8 @@ Votes are always excluded. Failed transactions are included only when `track_fai
 | `postgresql://user:pass@host:5432/db` | PostgreSQL |
 
 SQLite runs in WAL mode, so `index.db-wal` and `index.db-shm` appear next to
-the database file. Keep them with it.
-
-Migrations from `migrations/<backend>/` run at startup on both new and existing
-databases. `events` carries indexes on `slot`, `kind`, `program`, and
-`(signature, ix_path, kind)` so each `/events` filter seeks rather than scans;
-see [operations-runbook.md](./operations-runbook.md#query-indexes).
-
----
+the database file. Keep them with it. Migrations run at every start. Indexes:
+see the [runbook](./operations-runbook.md#query-indexes).
 
 ## `serve`
 
@@ -75,15 +46,11 @@ see [operations-runbook.md](./operations-runbook.md#query-indexes).
 |-------|------|---------|-------------|
 | `bind` | string | `127.0.0.1:8080` | HTTP/WebSocket listen address. Override with `index run --bind`. A non-loopback bind with no API keys logs a warning: all data is then open to the network. The server has no TLS, so a non-loopback bind also needs a TLS reverse proxy that sets `X-Forwarded-Host`. With no API keys, on any bind, every route returns `403` unless `Host` is `localhost`, `*.localhost` or an IP literal (DNS-rebinding guard). The server speaks HTTP/1.1 only. |
 
----
-
 ## `programs`
 
 | Type | Description |
 |------|-------------|
 | `string[]` (paths) | IDL JSON file paths, one Anchor program per file. The parent directory becomes the IDL load path at runtime (default `./idls`). |
-
-At least one IDL is recommended for program instruction decoding. Token transfers decode without IDLs when `track_tokens` is enabled.
 
 Only the first entry's **parent directory** is used: the router then loads every
 `*.json` in it. Listing one file out of a shared directory does not narrow the
@@ -101,15 +68,11 @@ An IDL with an empty or invalid `address`, or a program name longer than 64
 bytes or with control or bidi characters, is skipped at load with the warning
 `skip IDL file`.
 
----
-
 ## `wallets`
 
 | Type | Default | Description |
 |------|---------|-------------|
 | `string[]` | `[]` | Wallet addresses for geyser `account_include`. They are added to `accounts_include`, the IDL program ids and the token programs (when `track_tokens` is on). They replace nothing. Override with repeated `index run --wallet <ADDR>`. |
-
----
 
 ## `rpc_url`
 
@@ -117,11 +80,9 @@ bytes or with control or bidi characters, is skipped at load with the warning
 |------|---------|-------------|
 | `string` (optional) | none | Solana JSON-RPC endpoint for gap detection backfill via `getBlock`. Without this (and without `SOLANA_RPC_URL`), gaps are recorded but not repaired. |
 
----
-
 ## `sinks`
 
-Optional event fan-out destinations. Events are always stored in the database; sinks receive a copy after successful insert.
+Optional fan-out. Sinks get a copy of each event after the store insert.
 
 Each sink entry:
 
@@ -155,11 +116,8 @@ entry, for example `sinks[1]: unknown sink kind: kafka`.
 Webhooks use a 2s connect timeout and a 5s request timeout, try each event up
 to 3 times, and do not follow redirects. Under `--tui`, `stdout` sinks are off.
 
----
-
 ## `auth`
 
-Optional API key protection for sensitive HTTP routes.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -177,11 +135,8 @@ For this, a key must use token characters only (letters, digits, `-._~`).
 
 Override with comma-separated `INDEX_API_KEYS` env var (replaces YAML `auth` block when non-empty). An empty `INDEX_API_KEYS` does not override `index.yaml`. A value with no key in it (for example `,`) is an error.
 
----
-
 ## `grpc`
 
-Optional gRPC export for downstream consumers.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -196,8 +151,6 @@ With API keys set, every call needs the key in metadata: `x-api-key: <key>` or
 `authorization: Bearer <key>`. Otherwise the call fails with `Unauthenticated`.
 
 Stream and connection limits: [runbook](./operations-runbook.md#server-limits).
-
----
 
 ## `clickhouse`
 
@@ -230,11 +183,9 @@ How it works:
   merges. Use `FINAL` to read the merged result at once.
 - Only events stored after you turn it on are sent.
 
----
-
 ## Environment variable overrides
 
-Environment variables are loaded from `.env` (via `dotenvy`) and override YAML values when non-empty.
+Env vars load from `.env` and override YAML when non-empty.
 
 | Env var | Overrides | Notes |
 |---------|-----------|-------|
@@ -246,8 +197,6 @@ Environment variables are loaded from `.env` (via `dotenvy`) and override YAML v
 | `INDEX_API_KEYS` | `auth.api_keys` | Comma-separated; replaces entire auth block. Empty counts as unset; a value with no key in it (for example `,`) is an error |
 
 No env overrides exist for `track_failed`, `track_tokens`, `accounts_include`, `sinks`, `grpc`, or `programs`. Set those in YAML.
-
----
 
 ## CLI overrides (`index run`)
 

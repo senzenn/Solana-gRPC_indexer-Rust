@@ -4,7 +4,7 @@ description = "Semantic drift detection for Solana program IDLs. Flags parser-br
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/rpcpool/yellowstone-vixen"
+publish = false
 
 # Dependencies are limited to permissive licenses accepted by Vixen's deny.toml
 # (MIT / Apache-2.0). serde, serde_json, clap all qualify.

@@ -111,7 +111,7 @@ enum Commands {
         auth_token: String,
     },
 
-    /// Serve stored events only (no geyser): demo / read-only mode
+    /// Serve stored events with no geyser stream (runs migrations; not read-only)
     Demo {
         #[arg(long, env = "DATABASE_URL", default_value = DEFAULT_STORE_URL, hide_env_values = true)]
         db: String,

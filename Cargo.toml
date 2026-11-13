@@ -55,7 +55,7 @@ reqwest = { version = "0.12.8", features = ["json", "stream"] }
 # SQLx database client
 sqlx = { version = "0.8.5", features = ["runtime-tokio-rustls", "sqlite", "postgres", "chrono", "uuid", "migrate"] }
 
-# Compression (IPFS CLI commands are simulated; no ipfs-api client)
+# zlib for on-chain Anchor IDL accounts (parser fetch)
 flate2 = "1.0"
 
 # Async trait support
